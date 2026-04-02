@@ -116,5 +116,26 @@ class TrainingArguments:
         return parse_yaml(Path(yaml_path), cls)
 
     def get_warmup_steps(self, num_training_steps: int, warmup_steps: float) -> int:
-        """Compute warmup steps from an int count or a float ratio of total steps."""
-        return int(warmup_steps) if warmup_steps >= 1 else math.ceil(num_training_steps * warmup_steps)
+        """Compute warmup steps from an int count or a float ratio of total steps.
+
+        Args:
+            num_training_steps: Total number of training steps.
+            warmup_steps: If < 1, interpreted as a ratio of `num_training_steps`. If >= 1, must be an
+                integer count of warmup steps.
+
+        Returns:
+            Number of warmup steps.
+
+        Raises:
+            ValueError: If `warmup_steps` is negative, or >= 1 but not an integer value.
+        """
+        if warmup_steps < 0:
+            raise ValueError(f"Invalid warmup_steps={warmup_steps}. Expected a non-negative value.")
+        if warmup_steps < 1:
+            return math.ceil(num_training_steps * warmup_steps)
+        if not float(warmup_steps).is_integer():
+            raise ValueError(
+                f"Invalid warmup_steps={warmup_steps}. When warmup_steps >= 1 it must be an integer "
+                "number of steps or a float numerically equal to an integer (e.g., 100.0)."
+            )
+        return int(warmup_steps)
