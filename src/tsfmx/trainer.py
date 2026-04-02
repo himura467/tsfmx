@@ -37,7 +37,7 @@ class MultimodalTrainer:
     """Trainer for multimodal, finetune, and baseline time series forecasting.
 
     - multimodal: adapter frozen, only fusion trained.
-    - finetune: text encoder frozen, both adapter and fusion trained with separate optimizers.
+    - finetune: both adapter and fusion trained with separate optimizers (text embeddings are precomputed).
     - baseline: adapter fine-tuned, fusion unused.
     """
 
