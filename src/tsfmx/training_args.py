@@ -21,16 +21,23 @@ class TrainingArguments:
     num_train_epochs: int = field(default=10, metadata={"help": "Total number of training epochs to perform."})
 
     # --- Learning Rate & Scheduler ---
-    learning_rate: float = field(default=1e-4, metadata={"help": "The initial learning rate for the optimizer."})
-    lr_scheduler_type: Literal["linear", "cosine"] = field(
-        default="linear",
-        metadata={"help": "The learning rate scheduler type to use."},
+    fusion_learning_rate: float = field(
+        default=1e-4, metadata={"help": "The initial learning rate for the fusion optimizer."}
     )
-    warmup_steps: float = field(
-        default=0.0,
-        metadata={
-            "help": "Number of steps for a linear warmup from 0 to `learning_rate`. Can be an integer (exact steps) or a float in [0, 1) (ratio of total steps)."
-        },
+    fusion_lr_scheduler_type: Literal["linear", "cosine"] = field(
+        default="linear", metadata={"help": "The learning rate scheduler type for the fusion optimizer."}
+    )
+    fusion_warmup_steps: float = field(
+        default=0.0, metadata={"help": "Warmup steps for the fusion optimizer (int or ratio)."}
+    )
+    adapter_learning_rate: float = field(
+        default=1e-5, metadata={"help": "The initial learning rate for the adapter optimizer."}
+    )
+    adapter_lr_scheduler_type: Literal["linear", "cosine"] = field(
+        default="linear", metadata={"help": "The learning rate scheduler type for the adapter optimizer."}
+    )
+    adapter_warmup_steps: float = field(
+        default=0.0, metadata={"help": "Warmup steps for the adapter optimizer (int or ratio)."}
     )
 
     # --- Optimizer ---
@@ -108,13 +115,6 @@ class TrainingArguments:
         """Load from YAML file."""
         return parse_yaml(Path(yaml_path), cls)
 
-    def get_warmup_steps(self, num_training_steps: int) -> int:
-        """Retrieve the number of steps used for linear warmup.
-
-        Args:
-            num_training_steps: Total number of optimizer steps across all epochs.
-
-        Returns:
-            Number of warmup steps.
-        """
-        return int(self.warmup_steps) if self.warmup_steps >= 1 else math.ceil(num_training_steps * self.warmup_steps)
+    def get_warmup_steps(self, num_training_steps: int, warmup_steps: float) -> int:
+        """Compute warmup steps from an int count or a float ratio of total steps."""
+        return int(warmup_steps) if warmup_steps >= 1 else math.ceil(num_training_steps * warmup_steps)

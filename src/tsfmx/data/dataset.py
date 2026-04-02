@@ -22,7 +22,7 @@ class PreprocessedDataset(Dataset[PreprocessedSample]):
 
     Args:
         data: List of preprocessed samples.
-        mode: 'multimodal' requires text_embeddings in every sample;
+        mode: 'multimodal' and 'finetune' require text_embeddings in every sample;
             'baseline' does not use text_embeddings.
     """
 
@@ -33,8 +33,8 @@ class PreprocessedDataset(Dataset[PreprocessedSample]):
         self._validate()
 
     def _validate(self) -> None:
-        if self.mode == "multimodal" and not all("text_embeddings" in s for s in self.data):
-            raise ValueError("All samples must contain 'text_embeddings' for multimodal mode")
+        if self.mode in ("multimodal", "finetune") and not all("text_embeddings" in s for s in self.data):
+            raise ValueError(f"All samples must contain 'text_embeddings' for {self.mode!r} mode")
 
     def __getitem__(self, index: int) -> PreprocessedSample:
         return self.data[index]
