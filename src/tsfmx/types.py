@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     import numpy.typing as npt
     import torch
 
-TrainingMode = Literal["multimodal", "baseline"]
+TrainingMode = Literal["multimodal", "finetune", "baseline"]
 
 
 class RawSample(TypedDict):
@@ -40,25 +40,38 @@ class Batch(TypedDict):
 
 
 class CheckpointBase(TypedDict):
-    """Base fields shared by all checkpoint types."""
+    """Base checkpoint fields."""
 
     epoch: int
     global_step: int
-    optimizer_state_dict: dict[str, Any]
-    scheduler_state_dict: dict[str, Any]
     best_val_loss: float
 
 
 class MultimodalCheckpoint(CheckpointBase):
-    """Checkpoint for multimodal mode."""
+    """Checkpoint for multimodal mode (fusion only)."""
 
     fusion_state_dict: dict[str, Any]
+    fusion_optimizer_state_dict: dict[str, Any]
+    fusion_scheduler_state_dict: dict[str, Any]
+
+
+class FinetuneCheckpoint(CheckpointBase):
+    """Checkpoint for fine-tuning mode (adapter + fusion)."""
+
+    fusion_state_dict: dict[str, Any]
+    adapter_state_dict: dict[str, Any]
+    fusion_optimizer_state_dict: dict[str, Any]
+    fusion_scheduler_state_dict: dict[str, Any]
+    adapter_optimizer_state_dict: dict[str, Any]
+    adapter_scheduler_state_dict: dict[str, Any]
 
 
 class BaselineCheckpoint(CheckpointBase):
-    """Checkpoint for baseline mode."""
+    """Checkpoint for baseline mode (adapter only)."""
 
     adapter_state_dict: dict[str, Any]
+    adapter_optimizer_state_dict: dict[str, Any]
+    adapter_scheduler_state_dict: dict[str, Any]
 
 
 class EvaluationMetrics(TypedDict):
