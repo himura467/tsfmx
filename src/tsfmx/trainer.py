@@ -149,6 +149,8 @@ class MultimodalTrainer:
                     lr=self.args.adapter_learning_rate,
                     weight_decay=self.args.weight_decay,
                 )
+            case _ as c:
+                raise NotImplementedError(f"Unsupported component: {c!r}")
 
     def _create_scheduler(
         self, component: Literal["fusion", "adapter"], optimizer: Optimizer, num_training_steps: int
@@ -203,18 +205,21 @@ class MultimodalTrainer:
     ) -> tuple[LRScheduler | None, LRScheduler | None]:
         match self.mode:
             case "multimodal":
-                assert self.fusion_optimizer is not None
+                if self.fusion_optimizer is None:
+                    raise RuntimeError("fusion_optimizer must not be None in multimodal mode")
                 return fusion_scheduler or self._create_scheduler(
                     "fusion", self.fusion_optimizer, num_training_steps
                 ), None
             case "finetune":
-                assert self.fusion_optimizer is not None and self.adapter_optimizer is not None
+                if self.fusion_optimizer is None or self.adapter_optimizer is None:
+                    raise RuntimeError("fusion_optimizer and adapter_optimizer must not be None in finetune mode")
                 return (
                     fusion_scheduler or self._create_scheduler("fusion", self.fusion_optimizer, num_training_steps),
                     adapter_scheduler or self._create_scheduler("adapter", self.adapter_optimizer, num_training_steps),
                 )
             case "baseline":
-                assert self.adapter_optimizer is not None
+                if self.adapter_optimizer is None:
+                    raise RuntimeError("adapter_optimizer must not be None in baseline mode")
                 return None, adapter_scheduler or self._create_scheduler(
                     "adapter", self.adapter_optimizer, num_training_steps
                 )
@@ -331,7 +336,8 @@ class MultimodalTrainer:
         """Build a mode-specific checkpoint dict from current training state."""
         match self.mode:
             case "multimodal":
-                assert self.fusion_optimizer is not None and self.fusion_scheduler is not None
+                if self.fusion_optimizer is None or self.fusion_scheduler is None:
+                    raise RuntimeError("fusion_optimizer and fusion_scheduler must not be None in multimodal mode")
                 return MultimodalCheckpoint(
                     epoch=self.current_epoch,
                     global_step=self.global_step,
@@ -341,12 +347,16 @@ class MultimodalTrainer:
                     fusion_scheduler_state_dict=self.fusion_scheduler.state_dict(),
                 )
             case "finetune":
-                assert (
-                    self.fusion_optimizer is not None
-                    and self.fusion_scheduler is not None
-                    and self.adapter_optimizer is not None
-                    and self.adapter_scheduler is not None
-                )
+                if (
+                    self.fusion_optimizer is None
+                    or self.fusion_scheduler is None
+                    or self.adapter_optimizer is None
+                    or self.adapter_scheduler is None
+                ):
+                    raise RuntimeError(
+                        "fusion_optimizer, fusion_scheduler, adapter_optimizer, and adapter_scheduler "
+                        "must not be None in finetune mode"
+                    )
                 return FinetuneCheckpoint(
                     epoch=self.current_epoch,
                     global_step=self.global_step,
@@ -359,7 +369,8 @@ class MultimodalTrainer:
                     adapter_scheduler_state_dict=self.adapter_scheduler.state_dict(),
                 )
             case "baseline":
-                assert self.adapter_optimizer is not None and self.adapter_scheduler is not None
+                if self.adapter_optimizer is None or self.adapter_scheduler is None:
+                    raise RuntimeError("adapter_optimizer and adapter_scheduler must not be None in baseline mode")
                 return BaselineCheckpoint(
                     epoch=self.current_epoch,
                     global_step=self.global_step,
@@ -379,19 +390,24 @@ class MultimodalTrainer:
             case "multimodal":
                 mc = cast(MultimodalCheckpoint, checkpoint)
                 self.model.fusion.load_state_dict(mc["fusion_state_dict"])
-                assert self.fusion_optimizer is not None and self.fusion_scheduler is not None
+                if self.fusion_optimizer is None or self.fusion_scheduler is None:
+                    raise RuntimeError("fusion_optimizer and fusion_scheduler must not be None in multimodal mode")
                 self.fusion_optimizer.load_state_dict(mc["fusion_optimizer_state_dict"])
                 self.fusion_scheduler.load_state_dict(mc["fusion_scheduler_state_dict"])
             case "finetune":
                 fc = cast(FinetuneCheckpoint, checkpoint)
                 self.model.fusion.load_state_dict(fc["fusion_state_dict"])
                 self.model.adapter.load_state_dict(fc["adapter_state_dict"])
-                assert (
-                    self.fusion_optimizer is not None
-                    and self.fusion_scheduler is not None
-                    and self.adapter_optimizer is not None
-                    and self.adapter_scheduler is not None
-                )
+                if (
+                    self.fusion_optimizer is None
+                    or self.fusion_scheduler is None
+                    or self.adapter_optimizer is None
+                    or self.adapter_scheduler is None
+                ):
+                    raise RuntimeError(
+                        "fusion_optimizer, fusion_scheduler, adapter_optimizer, and adapter_scheduler "
+                        "must not be None in finetune mode"
+                    )
                 self.fusion_optimizer.load_state_dict(fc["fusion_optimizer_state_dict"])
                 self.fusion_scheduler.load_state_dict(fc["fusion_scheduler_state_dict"])
                 self.adapter_optimizer.load_state_dict(fc["adapter_optimizer_state_dict"])
@@ -399,7 +415,8 @@ class MultimodalTrainer:
             case "baseline":
                 bc = cast(BaselineCheckpoint, checkpoint)
                 self.model.adapter.load_state_dict(bc["adapter_state_dict"])
-                assert self.adapter_optimizer is not None and self.adapter_scheduler is not None
+                if self.adapter_optimizer is None or self.adapter_scheduler is None:
+                    raise RuntimeError("adapter_optimizer and adapter_scheduler must not be None in baseline mode")
                 self.adapter_optimizer.load_state_dict(bc["adapter_optimizer_state_dict"])
                 self.adapter_scheduler.load_state_dict(bc["adapter_scheduler_state_dict"])
 
