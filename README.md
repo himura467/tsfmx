@@ -70,22 +70,22 @@ PYTHONPATH=. uv run python scripts/tune_time_mmd_sweep.py \
     --sweep-config examples/time_mmd/configs/sweeps/fusion_1layer.yml
 ```
 
-To compare against a fine-tuned baseline:
+To run the adapter mode (adapter fine-tuned, no fusion):
 
 **TimesFM**:
 
 ```sh
-PYTHONPATH=. uv run python scripts/tune_baseline_sweep.py \
+PYTHONPATH=. uv run python scripts/tune_adapter_sweep.py \
     --model-config examples/time_mmd/configs/models/timesfm.yml \
-    --sweep-config examples/time_mmd/configs/sweeps/baseline.yml
+    --sweep-config examples/time_mmd/configs/sweeps/adapter.yml
 ```
 
 **Chronos**:
 
 ```sh
-PYTHONPATH=. uv run python scripts/tune_baseline_sweep.py \
+PYTHONPATH=. uv run python scripts/tune_adapter_sweep.py \
     --model-config examples/time_mmd/configs/models/chronos.yml \
-    --sweep-config examples/time_mmd/configs/sweeps/baseline.yml
+    --sweep-config examples/time_mmd/configs/sweeps/adapter.yml
 ```
 
 ## Acknowledgments
