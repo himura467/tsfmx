@@ -62,10 +62,10 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _create_adapter_model(model_config: ModelConfig, device: torch.device) -> MultimodalDecoder:
-    """Build a MultimodalDecoder with a pretrained adapter for baseline fine-tuning.
+    """Build a MultimodalDecoder with a pretrained adapter for adapter fine-tuning.
 
     The fusion head is constructed from model_config but remains unused during
-    baseline training; only the adapter parameters are fine-tuned.
+    adapter training; only the adapter parameters are fine-tuned.
 
     Args:
         model_config: Static model configuration (adapter repo, embedding dims).
