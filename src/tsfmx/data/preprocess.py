@@ -80,7 +80,7 @@ class PreprocessPipeline:
         _logger.info(
             "Preprocessing %s samples (%s)",
             len(dataset),
-            "fusion" if text_encoder is not None else "baseline",
+            "with text" if text_encoder is not None else "without text",
         )
         if text_encoder is not None:
             if device is None:
