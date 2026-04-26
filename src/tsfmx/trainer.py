@@ -1,4 +1,4 @@
-"""Trainer for multimodal time series forecasting."""
+"""Trainer for multimodal time series forecasting in fusion, finetune, and adapter modes."""
 
 from __future__ import annotations
 
