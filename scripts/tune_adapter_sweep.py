@@ -175,9 +175,11 @@ def _train_and_evaluate(
 
     trainer.train()
 
-    best_checkpoint_path = training_args.checkpoint_dir / "best_model.pt"
-    _logger.info("Loading best checkpoint from %s", best_checkpoint_path)
-    checkpoint = cast(AdapterCheckpoint, torch.load(best_checkpoint_path, weights_only=True))
+    trial_best_checkpoint_path = training_args.checkpoint_dir / "best_model.pt"
+    _logger.info("Loading best checkpoint from %s", trial_best_checkpoint_path)
+    checkpoint = cast(
+        AdapterCheckpoint, torch.load(trial_best_checkpoint_path, weights_only=True)
+    )
     best_val_loss = checkpoint["best_val_loss"]
     model.adapter.load_state_dict(checkpoint["adapter_state_dict"])
 
