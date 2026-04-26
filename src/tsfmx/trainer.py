@@ -20,7 +20,7 @@ from tsfmx.types import (
     BaselineCheckpoint,
     Batch,
     FinetuneCheckpoint,
-    MultimodalCheckpoint,
+    FusionCheckpoint,
     PreprocessedSample,
     TrainingMode,
 )
@@ -36,7 +36,7 @@ _logger = get_logger()
 class MultimodalTrainer:
     """Trainer for multimodal, finetune, and baseline time series forecasting.
 
-    - multimodal: adapter frozen, only fusion trained.
+    - fusion: adapter frozen, only fusion trained.
     - finetune: both adapter and fusion trained with separate optimizers (text embeddings are precomputed).
     - baseline: adapter fine-tuned, fusion unused.
     """
@@ -76,12 +76,12 @@ class MultimodalTrainer:
 
         self.model.to(self.device)
 
-        if mode == "multimodal":
+        if mode == "fusion":
             self.model.adapter.freeze_parameters()
         else:
             self.model.adapter.unfreeze_parameters()
 
-        collate_fn = multimodal_collate_fn if mode in ("multimodal", "finetune") else baseline_collate_fn
+        collate_fn = multimodal_collate_fn if mode in ("fusion", "finetune") else baseline_collate_fn
         self.train_loader = cast(
             DataLoader[Batch],
             DataLoader(
@@ -127,7 +127,7 @@ class MultimodalTrainer:
     def _get_trainable_params(self) -> Iterator[nn.Parameter]:
         """Return all trainable parameters across active components."""
         match self.mode:
-            case "multimodal":
+            case "fusion":
                 yield from self.model.fusion.parameters()
             case "finetune":
                 yield from self.model.fusion.parameters()
@@ -185,7 +185,7 @@ class MultimodalTrainer:
         adapter_optimizer: Optimizer | None,
     ) -> tuple[Optimizer | None, Optimizer | None]:
         match self.mode:
-            case "multimodal":
+            case "fusion":
                 return fusion_optimizer or self._create_optimizer("fusion"), None
             case "finetune":
                 return (
@@ -204,9 +204,9 @@ class MultimodalTrainer:
         num_training_steps: int,
     ) -> tuple[LRScheduler | None, LRScheduler | None]:
         match self.mode:
-            case "multimodal":
+            case "fusion":
                 if self.fusion_optimizer is None:
-                    raise RuntimeError("fusion_optimizer must not be None in multimodal mode")
+                    raise RuntimeError("fusion_optimizer must not be None in fusion mode")
                 return fusion_scheduler or self._create_scheduler(
                     "fusion", self.fusion_optimizer, num_training_steps
                 ), None
@@ -332,13 +332,13 @@ class MultimodalTrainer:
 
         return total_loss / num_batches
 
-    def _build_checkpoint(self) -> MultimodalCheckpoint | FinetuneCheckpoint | BaselineCheckpoint:
+    def _build_checkpoint(self) -> FusionCheckpoint | FinetuneCheckpoint | BaselineCheckpoint:
         """Build a mode-specific checkpoint dict from current training state."""
         match self.mode:
-            case "multimodal":
+            case "fusion":
                 if self.fusion_optimizer is None or self.fusion_scheduler is None:
-                    raise RuntimeError("fusion_optimizer and fusion_scheduler must not be None in multimodal mode")
-                return MultimodalCheckpoint(
+                    raise RuntimeError("fusion_optimizer and fusion_scheduler must not be None in fusion mode")
+                return FusionCheckpoint(
                     epoch=self.current_epoch,
                     global_step=self.global_step,
                     best_val_loss=self.best_val_loss,
@@ -382,16 +382,14 @@ class MultimodalTrainer:
             case _ as mode:
                 raise NotImplementedError(f"Unsupported mode: {mode!r}")
 
-    def _load_checkpoint_state(
-        self, checkpoint: MultimodalCheckpoint | FinetuneCheckpoint | BaselineCheckpoint
-    ) -> None:
+    def _load_checkpoint_state(self, checkpoint: FusionCheckpoint | FinetuneCheckpoint | BaselineCheckpoint) -> None:
         """Load mode-specific state from checkpoint."""
         match self.mode:
-            case "multimodal":
-                mc = cast(MultimodalCheckpoint, checkpoint)
+            case "fusion":
+                mc = cast(FusionCheckpoint, checkpoint)
                 self.model.fusion.load_state_dict(mc["fusion_state_dict"])
                 if self.fusion_optimizer is None or self.fusion_scheduler is None:
-                    raise RuntimeError("fusion_optimizer and fusion_scheduler must not be None in multimodal mode")
+                    raise RuntimeError("fusion_optimizer and fusion_scheduler must not be None in fusion mode")
                 self.fusion_optimizer.load_state_dict(mc["fusion_optimizer_state_dict"])
                 self.fusion_scheduler.load_state_dict(mc["fusion_scheduler_state_dict"])
             case "finetune":
@@ -500,7 +498,7 @@ class MultimodalTrainer:
             best_path = self.args.checkpoint_dir / "best_model.pt"
             if best_path.exists():
                 checkpoint = cast(
-                    MultimodalCheckpoint | FinetuneCheckpoint | BaselineCheckpoint,
+                    FusionCheckpoint | FinetuneCheckpoint | BaselineCheckpoint,
                     torch.load(best_path, weights_only=True),
                 )
                 self._load_checkpoint_state(checkpoint)

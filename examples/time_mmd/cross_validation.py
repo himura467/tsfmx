@@ -64,7 +64,7 @@ def load_fold_datasets(
                 augment=spec.augment,
             )
             cached_data = cache.load(cache_path)
-            datasets.append(PreprocessedDataset(cached_data, mode="multimodal"))
+            datasets.append(PreprocessedDataset(cached_data, mode="fusion"))
         return datasets
 
     train_datasets = load_cached_domains(train_domain_specs)

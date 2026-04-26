@@ -22,7 +22,7 @@ from tsfmx.training_args import TrainingArguments
 from tsfmx.tsfm.base import TsfmAdapter
 from tsfmx.tsfm.chronos import Chronos2Adapter
 from tsfmx.tsfm.timesfm import TimesFM2p5Adapter
-from tsfmx.types import Batch, MultimodalCheckpoint
+from tsfmx.types import Batch, FusionCheckpoint
 from tsfmx.utils.device import pin_memory, resolve_device
 from tsfmx.utils.logging import setup_logger
 from tsfmx.utils.seed import set_seed
@@ -219,7 +219,7 @@ def _train_and_evaluate(
         args=training_args,
         train_dataset=train_dataset,
         val_dataset=val_dataset,
-        mode="multimodal",
+        mode="fusion",
         device=device,
         wandb_run=run,
     )
@@ -228,7 +228,7 @@ def _train_and_evaluate(
 
     best_checkpoint_path = training_args.checkpoint_dir / "best_model.pt"
     _logger.info("Loading best checkpoint from %s", best_checkpoint_path)
-    checkpoint = cast(MultimodalCheckpoint, torch.load(best_checkpoint_path, weights_only=True))
+    checkpoint = cast(FusionCheckpoint, torch.load(best_checkpoint_path, weights_only=True))
     best_val_loss = checkpoint["best_val_loss"]
     model.fusion.load_state_dict(checkpoint["fusion_state_dict"])
 
@@ -290,7 +290,7 @@ def main() -> int:
         _logger.info("Using default ForecastConfig")
 
     base_training_args = TrainingArguments(
-        output_dir="outputs/sweeps/multimodal",
+        output_dir="outputs/sweeps/fusion",
         logging_strategy="epoch",
         eval_strategy="epoch",
         save_strategy="best",
@@ -319,7 +319,7 @@ def main() -> int:
     device = resolve_device()
     _logger.info("Using device: %s", device)
 
-    wandb_project = f"multimodal-{model_config.adapter.type}-time-mmd"
+    wandb_project = f"fusion-{model_config.adapter.type}-time-mmd"
 
     def _sweep_fn() -> None:
         """Execute a single sweep trial inside a W&B run context."""

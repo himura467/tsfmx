@@ -12,7 +12,7 @@ from tsfmx.types import Batch, EvaluationMetrics
 class MultimodalEvaluator:
     """Computes evaluation metrics for a multimodal decoder.
 
-    In multimodal mode, text embeddings from the batch are fused with time series embeddings.
+    In fusion/finetune mode, text embeddings from the batch are fused with time series embeddings.
     In baseline mode, no text embeddings are present in the batch and fusion is skipped.
     """
 
