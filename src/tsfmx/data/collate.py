@@ -24,6 +24,6 @@ def multimodal_collate_fn(batch: list[PreprocessedSample]) -> Batch:
     return result
 
 
-def baseline_collate_fn(batch: list[PreprocessedSample]) -> Batch:
-    """Collate function for baseline batches (no text)."""
+def adapter_collate_fn(batch: list[PreprocessedSample]) -> Batch:
+    """Collate function for adapter batches (no text embeddings)."""
     return _build_batch(batch)

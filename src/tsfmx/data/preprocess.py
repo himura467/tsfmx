@@ -118,7 +118,7 @@ class PreprocessPipeline:
         Args:
             path: Target file path.
             dataset_factory: Callable that returns a raw MultimodalDatasetBase.
-            text_encoder: Text encoder for fusion/finetune modes. None for baseline mode.
+            text_encoder: Text encoder for fusion/finetune modes. None for adapter mode.
             device: Required when text_encoder is provided.
             force_rebuild: Rebuild even if file exists.
 

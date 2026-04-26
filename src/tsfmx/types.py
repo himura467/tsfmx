@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     import numpy.typing as npt
     import torch
 
-TrainingMode = Literal["fusion", "finetune", "baseline"]
+TrainingMode = Literal["fusion", "finetune", "adapter"]
 
 
 class RawSample(TypedDict):
@@ -66,8 +66,8 @@ class FinetuneCheckpoint(CheckpointBase):
     adapter_scheduler_state_dict: dict[str, Any]
 
 
-class BaselineCheckpoint(CheckpointBase):
-    """Checkpoint for baseline mode (adapter only)."""
+class AdapterCheckpoint(CheckpointBase):
+    """Checkpoint for adapter mode."""
 
     adapter_state_dict: dict[str, Any]
     adapter_optimizer_state_dict: dict[str, Any]

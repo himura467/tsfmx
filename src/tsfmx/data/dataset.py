@@ -23,7 +23,7 @@ class PreprocessedDataset(Dataset[PreprocessedSample]):
     Args:
         data: List of preprocessed samples.
         mode: 'fusion' and 'finetune' require text_embeddings in every sample;
-            'baseline' does not use text_embeddings.
+            'adapter' does not use text_embeddings.
     """
 
     def __init__(self, data: list[PreprocessedSample], mode: TrainingMode) -> None:
