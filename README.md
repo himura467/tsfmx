@@ -52,7 +52,7 @@ PYTHONPATH=. uv run python scripts/cache_time_mmd_datasets.py \
 
 ### 3. Hyperparameter Tuning
 
-Run a W&B Sweeps search for the multimodal model:
+Run a W&B Sweeps search for the fusion mode (adapter frozen, fusion layer trained):
 
 **TimesFM**:
 
