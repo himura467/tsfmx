@@ -56,6 +56,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--cache-dir", type=str, default="data/cache", help="Directory with pre-computed cached datasets."
     )
+    parser.add_argument(
+        "--best-checkpoint-path",
+        type=str,
+        default="outputs/sweeps/adapter/best_adapter.pt",
+        help=(
+            "Path to save the best adapter checkpoint (lowest val loss) across all sweep trials "
+            "within this agent process. Not coordinated across multiple agents."
+        ),
+    )
     parser.add_argument("--seed", type=int, help="Random seed for reproducibility.")
 
     return parser.parse_args()
@@ -111,13 +120,17 @@ def _train_and_evaluate(
     test_domain_specs: list[DomainSpec],
     device: torch.device,
     cache_dir: Path,
+    best_state: dict[str, float],
+    best_checkpoint_path: Path,
 ) -> None:
     """Run one sweep trial: fine-tune the adapter and log metrics to W&B.
 
     Reads hyperparameters from the active W&B run config, fine-tunes the
     adapter, loads the best checkpoint, evaluates on the test set, and logs
     val/best_loss, test/mse, and test/mae.
-    The checkpoint directory is removed after evaluation.
+    If this trial achieves a lower val loss than all previous trials within
+    this agent process, the best checkpoint is copied to best_checkpoint_path
+    before the trial directory is removed.
 
     Args:
         run: Active W&B run whose config provides this trial's hyperparameters.
@@ -129,6 +142,8 @@ def _train_and_evaluate(
         test_domain_specs: Domain specs used for test evaluation.
         device: Device to train and evaluate on.
         cache_dir: Directory containing pre-computed cached datasets.
+        best_state: Mutable dict with key "val_loss" tracking the best val loss seen so far.
+        best_checkpoint_path: Path where the overall best checkpoint is written.
     """
     config = run.config
     _logger.info("Starting sweep run %s with config: %s", run.id, dict(config))
@@ -175,9 +190,9 @@ def _train_and_evaluate(
 
     trainer.train()
 
-    best_checkpoint_path = training_args.checkpoint_dir / "best_model.pt"
-    _logger.info("Loading best checkpoint from %s", best_checkpoint_path)
-    checkpoint = cast(AdapterCheckpoint, torch.load(best_checkpoint_path, weights_only=True))
+    trial_best_checkpoint_path = training_args.checkpoint_dir / "best_model.pt"
+    _logger.info("Loading best checkpoint from %s", trial_best_checkpoint_path)
+    checkpoint = cast(AdapterCheckpoint, torch.load(trial_best_checkpoint_path, weights_only=True))
     best_val_loss = checkpoint["best_val_loss"]
     model.adapter.load_state_dict(checkpoint["adapter_state_dict"])
 
@@ -208,6 +223,15 @@ def _train_and_evaluate(
         {"val/best_loss": best_val_loss, "test/mse": test_metrics["mse"], "test/mae": test_metrics["mae"]},
         step=trainer.global_step,
     )
+
+    if best_val_loss < best_state["val_loss"]:
+        best_state["val_loss"] = best_val_loss
+        shutil.copy(trial_best_checkpoint_path, best_checkpoint_path)
+        _logger.info(
+            "New best adapter checkpoint saved to %s (val_loss=%.6f)",
+            best_checkpoint_path,
+            best_val_loss,
+        )
 
     checkpoint_dir = training_args.checkpoint_dir
     if checkpoint_dir.exists():
@@ -270,6 +294,10 @@ def main() -> int:
 
     wandb_project = f"adapter-{model_config.adapter.type}-time-mmd"
 
+    best_state: dict[str, float] = {"val_loss": float("inf")}
+    best_checkpoint_path = Path(args.best_checkpoint_path)
+    best_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+
     def _sweep_fn() -> None:
         """Execute a single sweep trial inside a W&B run context."""
         with wandb.init(project=wandb_project) as run:
@@ -283,6 +311,8 @@ def main() -> int:
                 test_domain_specs=test_domain_specs,
                 device=device,
                 cache_dir=Path(args.cache_dir),
+                best_state=best_state,
+                best_checkpoint_path=best_checkpoint_path,
             )
 
     if args.sweep_id:
