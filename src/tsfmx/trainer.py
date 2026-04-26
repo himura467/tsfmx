@@ -1,4 +1,4 @@
-"""Trainer for multimodal and baseline time series forecasting."""
+"""Trainer for multimodal time series forecasting in fusion, finetune, and adapter modes."""
 
 from __future__ import annotations
 
@@ -12,15 +12,15 @@ from torch.optim import AdamW, Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import ConcatDataset, DataLoader
 
-from tsfmx.data.collate import baseline_collate_fn, multimodal_collate_fn
+from tsfmx.data.collate import adapter_collate_fn, multimodal_collate_fn
 from tsfmx.decoder import MultimodalDecoder
 from tsfmx.optimization import get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
 from tsfmx.training_args import TrainingArguments
 from tsfmx.types import (
-    BaselineCheckpoint,
+    AdapterCheckpoint,
     Batch,
     FinetuneCheckpoint,
-    MultimodalCheckpoint,
+    FusionCheckpoint,
     PreprocessedSample,
     TrainingMode,
 )
@@ -34,11 +34,11 @@ _logger = get_logger()
 
 
 class MultimodalTrainer:
-    """Trainer for multimodal, finetune, and baseline time series forecasting.
+    """Trainer for multimodal time series forecasting across all three modes.
 
-    - multimodal: adapter frozen, only fusion trained.
+    - fusion: adapter frozen, only fusion trained.
     - finetune: both adapter and fusion trained with separate optimizers (text embeddings are precomputed).
-    - baseline: adapter fine-tuned, fusion unused.
+    - adapter: adapter fine-tuned, fusion unused.
     """
 
     def __init__(
@@ -76,12 +76,12 @@ class MultimodalTrainer:
 
         self.model.to(self.device)
 
-        if mode == "multimodal":
+        if mode == "fusion":
             self.model.adapter.freeze_parameters()
         else:
             self.model.adapter.unfreeze_parameters()
 
-        collate_fn = multimodal_collate_fn if mode in ("multimodal", "finetune") else baseline_collate_fn
+        collate_fn = multimodal_collate_fn if mode in ("fusion", "finetune") else adapter_collate_fn
         self.train_loader = cast(
             DataLoader[Batch],
             DataLoader(
@@ -127,12 +127,12 @@ class MultimodalTrainer:
     def _get_trainable_params(self) -> Iterator[nn.Parameter]:
         """Return all trainable parameters across active components."""
         match self.mode:
-            case "multimodal":
+            case "fusion":
                 yield from self.model.fusion.parameters()
             case "finetune":
                 yield from self.model.fusion.parameters()
                 yield from (p for p in self.model.adapter.parameters() if p.requires_grad)
-            case "baseline":
+            case "adapter":
                 yield from (p for p in self.model.adapter.parameters() if p.requires_grad)
 
     def _create_optimizer(self, component: Literal["fusion", "adapter"]) -> Optimizer:
@@ -185,14 +185,14 @@ class MultimodalTrainer:
         adapter_optimizer: Optimizer | None,
     ) -> tuple[Optimizer | None, Optimizer | None]:
         match self.mode:
-            case "multimodal":
+            case "fusion":
                 return fusion_optimizer or self._create_optimizer("fusion"), None
             case "finetune":
                 return (
                     fusion_optimizer or self._create_optimizer("fusion"),
                     adapter_optimizer or self._create_optimizer("adapter"),
                 )
-            case "baseline":
+            case "adapter":
                 return None, adapter_optimizer or self._create_optimizer("adapter")
             case _ as mode:
                 raise NotImplementedError(f"Unsupported mode: {mode!r}")
@@ -204,9 +204,9 @@ class MultimodalTrainer:
         num_training_steps: int,
     ) -> tuple[LRScheduler | None, LRScheduler | None]:
         match self.mode:
-            case "multimodal":
+            case "fusion":
                 if self.fusion_optimizer is None:
-                    raise RuntimeError("fusion_optimizer must not be None in multimodal mode")
+                    raise RuntimeError("fusion_optimizer must not be None in fusion mode")
                 return fusion_scheduler or self._create_scheduler(
                     "fusion", self.fusion_optimizer, num_training_steps
                 ), None
@@ -217,9 +217,9 @@ class MultimodalTrainer:
                     fusion_scheduler or self._create_scheduler("fusion", self.fusion_optimizer, num_training_steps),
                     adapter_scheduler or self._create_scheduler("adapter", self.adapter_optimizer, num_training_steps),
                 )
-            case "baseline":
+            case "adapter":
                 if self.adapter_optimizer is None:
-                    raise RuntimeError("adapter_optimizer must not be None in baseline mode")
+                    raise RuntimeError("adapter_optimizer must not be None in adapter mode")
                 return None, adapter_scheduler or self._create_scheduler(
                     "adapter", self.adapter_optimizer, num_training_steps
                 )
@@ -332,13 +332,13 @@ class MultimodalTrainer:
 
         return total_loss / num_batches
 
-    def _build_checkpoint(self) -> MultimodalCheckpoint | FinetuneCheckpoint | BaselineCheckpoint:
+    def _build_checkpoint(self) -> FusionCheckpoint | FinetuneCheckpoint | AdapterCheckpoint:
         """Build a mode-specific checkpoint dict from current training state."""
         match self.mode:
-            case "multimodal":
+            case "fusion":
                 if self.fusion_optimizer is None or self.fusion_scheduler is None:
-                    raise RuntimeError("fusion_optimizer and fusion_scheduler must not be None in multimodal mode")
-                return MultimodalCheckpoint(
+                    raise RuntimeError("fusion_optimizer and fusion_scheduler must not be None in fusion mode")
+                return FusionCheckpoint(
                     epoch=self.current_epoch,
                     global_step=self.global_step,
                     best_val_loss=self.best_val_loss,
@@ -368,10 +368,10 @@ class MultimodalTrainer:
                     adapter_optimizer_state_dict=self.adapter_optimizer.state_dict(),
                     adapter_scheduler_state_dict=self.adapter_scheduler.state_dict(),
                 )
-            case "baseline":
+            case "adapter":
                 if self.adapter_optimizer is None or self.adapter_scheduler is None:
-                    raise RuntimeError("adapter_optimizer and adapter_scheduler must not be None in baseline mode")
-                return BaselineCheckpoint(
+                    raise RuntimeError("adapter_optimizer and adapter_scheduler must not be None in adapter mode")
+                return AdapterCheckpoint(
                     epoch=self.current_epoch,
                     global_step=self.global_step,
                     best_val_loss=self.best_val_loss,
@@ -382,22 +382,20 @@ class MultimodalTrainer:
             case _ as mode:
                 raise NotImplementedError(f"Unsupported mode: {mode!r}")
 
-    def _load_checkpoint_state(
-        self, checkpoint: MultimodalCheckpoint | FinetuneCheckpoint | BaselineCheckpoint
-    ) -> None:
+    def _load_checkpoint_state(self, checkpoint: FusionCheckpoint | FinetuneCheckpoint | AdapterCheckpoint) -> None:
         """Load mode-specific state from checkpoint."""
         match self.mode:
-            case "multimodal":
-                mc = cast(MultimodalCheckpoint, checkpoint)
-                self.model.fusion.load_state_dict(mc["fusion_state_dict"])
+            case "fusion":
+                ckpt = cast(FusionCheckpoint, checkpoint)
+                self.model.fusion.load_state_dict(ckpt["fusion_state_dict"])
                 if self.fusion_optimizer is None or self.fusion_scheduler is None:
-                    raise RuntimeError("fusion_optimizer and fusion_scheduler must not be None in multimodal mode")
-                self.fusion_optimizer.load_state_dict(mc["fusion_optimizer_state_dict"])
-                self.fusion_scheduler.load_state_dict(mc["fusion_scheduler_state_dict"])
+                    raise RuntimeError("fusion_optimizer and fusion_scheduler must not be None in fusion mode")
+                self.fusion_optimizer.load_state_dict(ckpt["fusion_optimizer_state_dict"])
+                self.fusion_scheduler.load_state_dict(ckpt["fusion_scheduler_state_dict"])
             case "finetune":
-                fc = cast(FinetuneCheckpoint, checkpoint)
-                self.model.fusion.load_state_dict(fc["fusion_state_dict"])
-                self.model.adapter.load_state_dict(fc["adapter_state_dict"])
+                ckpt = cast(FinetuneCheckpoint, checkpoint)
+                self.model.fusion.load_state_dict(ckpt["fusion_state_dict"])
+                self.model.adapter.load_state_dict(ckpt["adapter_state_dict"])
                 if (
                     self.fusion_optimizer is None
                     or self.fusion_scheduler is None
@@ -408,17 +406,17 @@ class MultimodalTrainer:
                         "fusion_optimizer, fusion_scheduler, adapter_optimizer, and adapter_scheduler "
                         "must not be None in finetune mode"
                     )
-                self.fusion_optimizer.load_state_dict(fc["fusion_optimizer_state_dict"])
-                self.fusion_scheduler.load_state_dict(fc["fusion_scheduler_state_dict"])
-                self.adapter_optimizer.load_state_dict(fc["adapter_optimizer_state_dict"])
-                self.adapter_scheduler.load_state_dict(fc["adapter_scheduler_state_dict"])
-            case "baseline":
-                bc = cast(BaselineCheckpoint, checkpoint)
-                self.model.adapter.load_state_dict(bc["adapter_state_dict"])
+                self.fusion_optimizer.load_state_dict(ckpt["fusion_optimizer_state_dict"])
+                self.fusion_scheduler.load_state_dict(ckpt["fusion_scheduler_state_dict"])
+                self.adapter_optimizer.load_state_dict(ckpt["adapter_optimizer_state_dict"])
+                self.adapter_scheduler.load_state_dict(ckpt["adapter_scheduler_state_dict"])
+            case "adapter":
+                ckpt = cast(AdapterCheckpoint, checkpoint)
+                self.model.adapter.load_state_dict(ckpt["adapter_state_dict"])
                 if self.adapter_optimizer is None or self.adapter_scheduler is None:
-                    raise RuntimeError("adapter_optimizer and adapter_scheduler must not be None in baseline mode")
-                self.adapter_optimizer.load_state_dict(bc["adapter_optimizer_state_dict"])
-                self.adapter_scheduler.load_state_dict(bc["adapter_scheduler_state_dict"])
+                    raise RuntimeError("adapter_optimizer and adapter_scheduler must not be None in adapter mode")
+                self.adapter_optimizer.load_state_dict(ckpt["adapter_optimizer_state_dict"])
+                self.adapter_scheduler.load_state_dict(ckpt["adapter_scheduler_state_dict"])
 
     def _rotate_checkpoints(self) -> None:
         if self.args.save_total_limit is None:
@@ -500,7 +498,7 @@ class MultimodalTrainer:
             best_path = self.args.checkpoint_dir / "best_model.pt"
             if best_path.exists():
                 checkpoint = cast(
-                    MultimodalCheckpoint | FinetuneCheckpoint | BaselineCheckpoint,
+                    FusionCheckpoint | FinetuneCheckpoint | AdapterCheckpoint,
                     torch.load(best_path, weights_only=True),
                 )
                 self._load_checkpoint_state(checkpoint)

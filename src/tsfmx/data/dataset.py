@@ -22,8 +22,8 @@ class PreprocessedDataset(Dataset[PreprocessedSample]):
 
     Args:
         data: List of preprocessed samples.
-        mode: 'multimodal' and 'finetune' require text_embeddings in every sample;
-            'baseline' does not use text_embeddings.
+        mode: 'fusion' and 'finetune' require text_embeddings in every sample;
+            'adapter' does not use text_embeddings.
     """
 
     def __init__(self, data: list[PreprocessedSample], mode: TrainingMode) -> None:
@@ -33,7 +33,7 @@ class PreprocessedDataset(Dataset[PreprocessedSample]):
         self._validate()
 
     def _validate(self) -> None:
-        if self.mode in ("multimodal", "finetune") and not all("text_embeddings" in s for s in self.data):
+        if self.mode in ("fusion", "finetune") and not all("text_embeddings" in s for s in self.data):
             raise ValueError(f"All samples must contain 'text_embeddings' for {self.mode!r} mode")
 
     def __getitem__(self, index: int) -> PreprocessedSample:

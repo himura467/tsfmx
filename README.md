@@ -52,14 +52,14 @@ PYTHONPATH=. uv run python scripts/cache_time_mmd_datasets.py \
 
 ### 3. Hyperparameter Tuning
 
-Run a W&B Sweeps search for the multimodal model:
+Run a W&B Sweeps search for the fusion mode (adapter frozen, fusion layer trained):
 
 **TimesFM**:
 
 ```sh
 PYTHONPATH=. uv run python scripts/tune_time_mmd_sweep.py \
     --model-config examples/time_mmd/configs/models/timesfm.yml \
-    --sweep-config examples/time_mmd/configs/sweeps/multimodal_1layer.yml
+    --sweep-config examples/time_mmd/configs/sweeps/fusion_1layer.yml
 ```
 
 **Chronos**:
@@ -67,25 +67,25 @@ PYTHONPATH=. uv run python scripts/tune_time_mmd_sweep.py \
 ```sh
 PYTHONPATH=. uv run python scripts/tune_time_mmd_sweep.py \
     --model-config examples/time_mmd/configs/models/chronos.yml \
-    --sweep-config examples/time_mmd/configs/sweeps/multimodal_1layer.yml
+    --sweep-config examples/time_mmd/configs/sweeps/fusion_1layer.yml
 ```
 
-To compare against a fine-tuned baseline:
+To run the adapter mode (adapter fine-tuned, no fusion):
 
 **TimesFM**:
 
 ```sh
-PYTHONPATH=. uv run python scripts/tune_baseline_sweep.py \
+PYTHONPATH=. uv run python scripts/tune_adapter_sweep.py \
     --model-config examples/time_mmd/configs/models/timesfm.yml \
-    --sweep-config examples/time_mmd/configs/sweeps/baseline.yml
+    --sweep-config examples/time_mmd/configs/sweeps/adapter.yml
 ```
 
 **Chronos**:
 
 ```sh
-PYTHONPATH=. uv run python scripts/tune_baseline_sweep.py \
+PYTHONPATH=. uv run python scripts/tune_adapter_sweep.py \
     --model-config examples/time_mmd/configs/models/chronos.yml \
-    --sweep-config examples/time_mmd/configs/sweeps/baseline.yml
+    --sweep-config examples/time_mmd/configs/sweeps/adapter.yml
 ```
 
 ## Acknowledgments

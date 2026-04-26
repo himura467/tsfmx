@@ -80,7 +80,7 @@ class PreprocessPipeline:
         _logger.info(
             "Preprocessing %s samples (%s)",
             len(dataset),
-            "multimodal" if text_encoder is not None else "baseline",
+            "with text" if text_encoder is not None else "without text",
         )
         if text_encoder is not None:
             if device is None:
@@ -118,7 +118,7 @@ class PreprocessPipeline:
         Args:
             path: Target file path.
             dataset_factory: Callable that returns a raw MultimodalDatasetBase.
-            text_encoder: Text encoder for multimodal mode. None for baseline mode.
+            text_encoder: Text encoder for fusion/finetune modes. None for adapter mode.
             device: Required when text_encoder is provided.
             force_rebuild: Rebuild even if file exists.
 

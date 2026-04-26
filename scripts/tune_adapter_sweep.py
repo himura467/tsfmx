@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hyperparameter tuning for baseline (fine-tuned) time series forecasting with W&B Sweeps."""
+"""Hyperparameter tuning for adapter (fine-tuned) time series forecasting with W&B Sweeps."""
 
 import argparse
 import shutil
@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 from examples.time_mmd.configs.forecast import ForecastConfig
 from examples.time_mmd.configs.model import ModelConfig
 from examples.time_mmd.cross_validation import DomainSpec, load_fold_datasets
-from tsfmx.data.collate import baseline_collate_fn
+from tsfmx.data.collate import adapter_collate_fn
 from tsfmx.decoder import MultimodalDecoder, MultimodalDecoderConfig
 from tsfmx.evaluator import MultimodalEvaluator
 from tsfmx.trainer import MultimodalTrainer
@@ -22,7 +22,7 @@ from tsfmx.training_args import TrainingArguments
 from tsfmx.tsfm.base import TsfmAdapter
 from tsfmx.tsfm.chronos import Chronos2Adapter
 from tsfmx.tsfm.timesfm import TimesFM2p5Adapter
-from tsfmx.types import BaselineCheckpoint, Batch
+from tsfmx.types import AdapterCheckpoint, Batch
 from tsfmx.utils.device import pin_memory, resolve_device
 from tsfmx.utils.logging import setup_logger
 from tsfmx.utils.seed import set_seed
@@ -38,7 +38,7 @@ def _parse_args() -> argparse.Namespace:
         Parsed namespace.
     """
     parser = argparse.ArgumentParser(
-        description="Run a W&B Sweeps hyperparameter search for baseline time series forecasting.",
+        description="Run a W&B Sweeps hyperparameter search for adapter time series forecasting.",
     )
 
     parser.add_argument("--sweep-id", type=str, help="Existing W&B sweep ID to join.")
@@ -61,7 +61,7 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _create_baseline_model(model_config: ModelConfig, device: torch.device) -> MultimodalDecoder:
+def _create_adapter_model(model_config: ModelConfig, device: torch.device) -> MultimodalDecoder:
     """Build a MultimodalDecoder with a pretrained adapter for baseline fine-tuning.
 
     The fusion head is constructed from model_config but remains unused during
@@ -161,14 +161,14 @@ def _train_and_evaluate(
         cache_dir=cache_dir,
     )
 
-    model = _create_baseline_model(model_config, device)
+    model = _create_adapter_model(model_config, device)
 
     trainer = MultimodalTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         val_dataset=val_dataset,
-        mode="baseline",
+        mode="adapter",
         device=device,
         wandb_run=run,
     )
@@ -177,7 +177,7 @@ def _train_and_evaluate(
 
     best_checkpoint_path = training_args.checkpoint_dir / "best_model.pt"
     _logger.info("Loading best checkpoint from %s", best_checkpoint_path)
-    checkpoint = cast(BaselineCheckpoint, torch.load(best_checkpoint_path, weights_only=True))
+    checkpoint = cast(AdapterCheckpoint, torch.load(best_checkpoint_path, weights_only=True))
     best_val_loss = checkpoint["best_val_loss"]
     model.adapter.load_state_dict(checkpoint["adapter_state_dict"])
 
@@ -188,7 +188,7 @@ def _train_and_evaluate(
             batch_size=training_args.per_device_eval_batch_size,
             shuffle=False,
             num_workers=0,
-            collate_fn=baseline_collate_fn,
+            collate_fn=adapter_collate_fn,
             pin_memory=pin_memory(device),
         ),
     )
@@ -239,7 +239,7 @@ def main() -> int:
         _logger.info("Using default ForecastConfig")
 
     base_training_args = TrainingArguments(
-        output_dir="outputs/sweeps/baseline",
+        output_dir="outputs/sweeps/adapter",
         logging_strategy="epoch",
         eval_strategy="epoch",
         save_strategy="best",
@@ -268,7 +268,7 @@ def main() -> int:
     device = resolve_device()
     _logger.info("Using device: %s", device)
 
-    wandb_project = f"baseline-{model_config.adapter.type}-time-mmd"
+    wandb_project = f"adapter-{model_config.adapter.type}-time-mmd"
 
     def _sweep_fn() -> None:
         """Execute a single sweep trial inside a W&B run context."""
