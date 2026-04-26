@@ -57,7 +57,7 @@ Run a W&B Sweeps search for the fusion mode (adapter frozen, fusion layer traine
 **TimesFM**:
 
 ```sh
-PYTHONPATH=. uv run python scripts/tune_time_mmd_sweep.py \
+PYTHONPATH=. uv run python scripts/tune_time_mmd_fusion_sweep.py \
     --model-config examples/time_mmd/configs/models/timesfm.yml \
     --sweep-config examples/time_mmd/configs/sweeps/fusion_1layer.yml
 ```
@@ -65,7 +65,7 @@ PYTHONPATH=. uv run python scripts/tune_time_mmd_sweep.py \
 **Chronos**:
 
 ```sh
-PYTHONPATH=. uv run python scripts/tune_time_mmd_sweep.py \
+PYTHONPATH=. uv run python scripts/tune_time_mmd_fusion_sweep.py \
     --model-config examples/time_mmd/configs/models/chronos.yml \
     --sweep-config examples/time_mmd/configs/sweeps/fusion_1layer.yml
 ```
@@ -75,7 +75,7 @@ To run the adapter mode (adapter fine-tuned, no fusion):
 **TimesFM**:
 
 ```sh
-PYTHONPATH=. uv run python scripts/tune_adapter_sweep.py \
+PYTHONPATH=. uv run python scripts/tune_time_mmd_adapter_sweep.py \
     --model-config examples/time_mmd/configs/models/timesfm.yml \
     --sweep-config examples/time_mmd/configs/sweeps/adapter.yml
 ```
@@ -83,7 +83,7 @@ PYTHONPATH=. uv run python scripts/tune_adapter_sweep.py \
 **Chronos**:
 
 ```sh
-PYTHONPATH=. uv run python scripts/tune_adapter_sweep.py \
+PYTHONPATH=. uv run python scripts/tune_time_mmd_adapter_sweep.py \
     --model-config examples/time_mmd/configs/models/chronos.yml \
     --sweep-config examples/time_mmd/configs/sweeps/adapter.yml
 ```
