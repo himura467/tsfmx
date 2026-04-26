@@ -59,7 +59,7 @@ Run a W&B Sweeps search for the multimodal model:
 ```sh
 PYTHONPATH=. uv run python scripts/tune_time_mmd_sweep.py \
     --model-config examples/time_mmd/configs/models/timesfm.yml \
-    --sweep-config examples/time_mmd/configs/sweeps/multimodal_1layer.yml
+    --sweep-config examples/time_mmd/configs/sweeps/fusion_1layer.yml
 ```
 
 **Chronos**:
@@ -67,7 +67,7 @@ PYTHONPATH=. uv run python scripts/tune_time_mmd_sweep.py \
 ```sh
 PYTHONPATH=. uv run python scripts/tune_time_mmd_sweep.py \
     --model-config examples/time_mmd/configs/models/chronos.yml \
-    --sweep-config examples/time_mmd/configs/sweeps/multimodal_1layer.yml
+    --sweep-config examples/time_mmd/configs/sweeps/fusion_1layer.yml
 ```
 
 To compare against a fine-tuned baseline:
