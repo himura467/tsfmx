@@ -246,7 +246,7 @@ def _train_and_evaluate(
 
     best_checkpoint_path = training_args.checkpoint_dir / "best_model.pt"
     _logger.info("Loading best checkpoint from %s", best_checkpoint_path)
-    checkpoint = cast(FinetuneCheckpoint, torch.load(best_checkpoint_path, weights_only=True))
+    checkpoint = cast(FinetuneCheckpoint, torch.load(best_checkpoint_path, weights_only=True, map_location=device))
     best_val_loss = checkpoint["best_val_loss"]
     model.fusion.load_state_dict(checkpoint["fusion_state_dict"])
     model.adapter.load_state_dict(checkpoint["adapter_state_dict"])
