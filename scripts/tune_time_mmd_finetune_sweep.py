@@ -172,7 +172,7 @@ def _train_and_evaluate(
     """Run one sweep trial: finetune adapter + fusion and log metrics to W&B.
 
     Reads hyperparameters from the active W&B run config, initializes the model
-    from the provided adapter checkpoint, trains in finetune mode, loads the best
+    from the provided fusion checkpoint, trains in finetune mode, loads the best
     checkpoint, evaluates on the test set, and logs val/best_loss, test/mse, and
     test/mae. The checkpoint directory is removed after evaluation.
 
@@ -186,7 +186,7 @@ def _train_and_evaluate(
         test_domain_specs: Domain specs used for test evaluation.
         device: Device to train and evaluate on.
         cache_dir: Directory containing pre-computed cached datasets.
-        fusion_checkpoint_path: Path to the adapter checkpoint for weight initialization.
+        fusion_checkpoint_path: Path to the fusion checkpoint for weight initialization before finetune training.
     """
     config = run.config
     _logger.info("Starting sweep run %s with config: %s", run.id, dict(config))
@@ -310,7 +310,7 @@ def main() -> int:
 
     fusion_checkpoint_path = Path(args.fusion_checkpoint_path)
     if not fusion_checkpoint_path.exists():
-        _logger.error("Adapter checkpoint not found: %s", fusion_checkpoint_path)
+        _logger.error("Fusion checkpoint not found: %s", fusion_checkpoint_path)
         return 1
 
     base_training_args = TrainingArguments(
