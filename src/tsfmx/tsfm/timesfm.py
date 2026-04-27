@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 import torch
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
@@ -23,15 +21,15 @@ class TimesFM2p5Adapter(TsfmAdapter):
 
     @property
     def model_dims(self) -> int:
-        return cast(int, self._model.md)
+        return self._model.md
 
     @property
     def patch_len(self) -> int:
-        return cast(int, self._model.p)
+        return self._model.p
 
     @property
     def point_forecast_index(self) -> int:
-        return cast(int, self._model.config.decode_index)
+        return self._model.config.decode_index
 
     def preprocess(
         self,
