@@ -26,7 +26,7 @@ class EnglishTextEncoder(TextEncoderBase):
         self._validate()
 
     def _validate(self) -> None:
-        actual_dim = self.sentence_transformer.get_sentence_embedding_dimension()
+        actual_dim = self.sentence_transformer.get_embedding_dimension()
         if actual_dim is None:
             raise ValueError("Could not determine embedding dimension from sentence transformer")
         if actual_dim != self.embedding_dim:
