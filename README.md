@@ -50,7 +50,7 @@ PYTHONPATH=. uv run python scripts/cache_time_mmd_datasets.py \
     --text-encoder-type english --augment
 ```
 
-### 3. Hyperparameter Tuning
+### 3. Fusion Hyperparameter Tuning
 
 Run a W&B Sweeps search for the fusion mode (adapter frozen, fusion layer trained):
 
@@ -59,7 +59,8 @@ Run a W&B Sweeps search for the fusion mode (adapter frozen, fusion layer traine
 ```sh
 PYTHONPATH=. uv run python scripts/tune_time_mmd_fusion_sweep.py \
     --model-config examples/time_mmd/configs/models/timesfm.yml \
-    --sweep-config examples/time_mmd/configs/sweeps/fusion_1layer.yml
+    --sweep-config examples/time_mmd/configs/sweeps/fusion_1layer.yml \
+    --best-checkpoint-path outputs/sweeps/fusion/best_fusion_timesfm.pt
 ```
 
 **Chronos**:
@@ -67,7 +68,8 @@ PYTHONPATH=. uv run python scripts/tune_time_mmd_fusion_sweep.py \
 ```sh
 PYTHONPATH=. uv run python scripts/tune_time_mmd_fusion_sweep.py \
     --model-config examples/time_mmd/configs/models/chronos.yml \
-    --sweep-config examples/time_mmd/configs/sweeps/fusion_1layer.yml
+    --sweep-config examples/time_mmd/configs/sweeps/fusion_1layer.yml \
+    --best-checkpoint-path outputs/sweeps/fusion/best_fusion_chronos.pt
 ```
 
 To run the adapter mode (adapter fine-tuned, no fusion):
@@ -86,6 +88,28 @@ PYTHONPATH=. uv run python scripts/tune_time_mmd_adapter_sweep.py \
 PYTHONPATH=. uv run python scripts/tune_time_mmd_adapter_sweep.py \
     --model-config examples/time_mmd/configs/models/chronos.yml \
     --sweep-config examples/time_mmd/configs/sweeps/adapter.yml
+```
+
+### 4. Finetune Hyperparameter Tuning
+
+After fusion tuning, run a W&B Sweeps search for the finetune mode (adapter + fusion trained jointly), starting from the best fusion checkpoint:
+
+**TimesFM**:
+
+```sh
+PYTHONPATH=. uv run python scripts/tune_time_mmd_finetune_sweep.py \
+    --model-config examples/time_mmd/configs/models/timesfm.yml \
+    --sweep-config examples/time_mmd/configs/sweeps/finetune_1layer.yml \
+    --fusion-checkpoint-path outputs/sweeps/fusion/best_fusion_timesfm.pt
+```
+
+**Chronos**:
+
+```sh
+PYTHONPATH=. uv run python scripts/tune_time_mmd_finetune_sweep.py \
+    --model-config examples/time_mmd/configs/models/chronos.yml \
+    --sweep-config examples/time_mmd/configs/sweeps/finetune_1layer.yml \
+    --fusion-checkpoint-path outputs/sweeps/fusion/best_fusion_chronos.pt
 ```
 
 ## Acknowledgments

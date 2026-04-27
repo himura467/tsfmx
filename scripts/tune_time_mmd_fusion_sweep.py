@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hyperparameter tuning for multimodal time series forecasting with W&B Sweeps."""
+"""Hyperparameter tuning for fusion (adapter frozen, fusion trained) time series forecasting with W&B Sweeps."""
 
 import argparse
 import shutil
@@ -38,7 +38,7 @@ def _parse_args() -> argparse.Namespace:
         Parsed namespace.
     """
     parser = argparse.ArgumentParser(
-        description="Run a W&B Sweeps hyperparameter search for multimodal time series forecasting.",
+        description="Run a W&B Sweeps hyperparameter search for fusion time series forecasting.",
     )
 
     parser.add_argument("--sweep-id", type=str, help="Existing W&B sweep ID to join.")
@@ -105,7 +105,7 @@ def _parse_fusion_hparams(config: Any) -> tuple[int, list[int]]:
     return num_fusion_layers, fusion_hidden_dims
 
 
-def _create_multimodal_model(
+def _create_fusion_model(
     model_config: ModelConfig,
     num_fusion_layers: int,
     fusion_hidden_dims: list[int],
@@ -151,7 +151,7 @@ def _create_multimodal_model(
         num_fusion_layers,
         fusion_hidden_dims,
     )
-    return MultimodalDecoder(adapter, config)
+    return MultimodalDecoder(adapter, config).to(device)
 
 
 def _train_and_evaluate(
@@ -222,7 +222,7 @@ def _train_and_evaluate(
         cache_dir=cache_dir,
     )
 
-    model = _create_multimodal_model(
+    model = _create_fusion_model(
         model_config,
         num_fusion_layers,
         fusion_hidden_dims,

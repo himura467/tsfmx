@@ -22,11 +22,11 @@ class Chronos2Adapter(TsfmAdapter):
 
     @property
     def model_dims(self) -> int:
-        return cast(int, self._model.model_dim)
+        return self._model.model_dim
 
     @property
     def patch_len(self) -> int:
-        return cast(int, self._model.chronos_config.input_patch_size)
+        return self._model.chronos_config.input_patch_size
 
     @property
     def point_forecast_index(self) -> int:
@@ -75,8 +75,8 @@ class Chronos2Adapter(TsfmAdapter):
         batch_size = input_embeddings.shape[0]
         dtype = input_embeddings.dtype
         device = input_embeddings.device
-        num_output_patches = cast(int, self._model.chronos_config.max_output_patches)
-        output_patch_size = cast(int, self._model.chronos_config.output_patch_size)
+        num_output_patches = self._model.chronos_config.max_output_patches
+        output_patch_size = self._model.chronos_config.output_patch_size
         time_encoding_scale = cast(int, self._model.chronos_config.time_encoding_scale)
 
         patched_future_covariates = torch.zeros(
@@ -139,8 +139,8 @@ class Chronos2Adapter(TsfmAdapter):
         Raises:
             ValueError: If horizon exceeds the model's maximum prediction length.
         """
-        num_output_patches = cast(int, self._model.chronos_config.max_output_patches)
-        output_patch_size = cast(int, self._model.chronos_config.output_patch_size)
+        num_output_patches = self._model.chronos_config.max_output_patches
+        output_patch_size = self._model.chronos_config.output_patch_size
 
         max_horizon = num_output_patches * output_patch_size
         if horizon > max_horizon:

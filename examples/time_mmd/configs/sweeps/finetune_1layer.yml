@@ -1,0 +1,41 @@
+method: bayes
+
+metric:
+  name: test/mse
+  goal: minimize
+
+parameters:
+  num_fusion_layers:
+    value: 1
+
+  batch_size:
+    values: [4, 8, 16, 32]
+
+  num_epochs:
+    values: [5, 10, 15, 20]
+
+  fusion_learning_rate:
+    distribution: log_uniform_values
+    min: 1e-6
+    max: 1e-3
+
+  adapter_learning_rate:
+    distribution: log_uniform_values
+    min: 1e-7
+    max: 1e-4
+
+  lr_scheduler_type:
+    values: ["linear", "cosine"]
+
+  warmup_steps:
+    distribution: uniform
+    min: 0.0
+    max: 0.1
+
+  weight_decay:
+    distribution: log_uniform_values
+    min: 1e-4
+    max: 1e-1
+
+  gradient_accumulation_steps:
+    values: [1, 2, 4, 8]

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Hyperparameter tuning for adapter (fine-tuned) time series forecasting with W&B Sweeps."""
+"""Hyperparameter tuning for finetune (adapter + fusion) time series forecasting with W&B Sweeps."""
 
 import argparse
 import shutil
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import torch
 import wandb
@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 from examples.time_mmd.configs.forecast import ForecastConfig
 from examples.time_mmd.configs.model import ModelConfig
 from examples.time_mmd.cross_validation import DomainSpec, load_fold_datasets
-from tsfmx.data.collate import adapter_collate_fn
+from tsfmx.data.collate import multimodal_collate_fn
 from tsfmx.decoder import MultimodalDecoder, MultimodalDecoderConfig
 from tsfmx.evaluator import MultimodalEvaluator
 from tsfmx.trainer import MultimodalTrainer
@@ -22,7 +22,7 @@ from tsfmx.training_args import TrainingArguments
 from tsfmx.tsfm.base import TsfmAdapter
 from tsfmx.tsfm.chronos import Chronos2Adapter
 from tsfmx.tsfm.timesfm import TimesFM2p5Adapter
-from tsfmx.types import AdapterCheckpoint, Batch
+from tsfmx.types import Batch, FinetuneCheckpoint, FusionCheckpoint
 from tsfmx.utils.device import pin_memory, resolve_device
 from tsfmx.utils.logging import setup_logger
 from tsfmx.utils.seed import set_seed
@@ -38,7 +38,7 @@ def _parse_args() -> argparse.Namespace:
         Parsed namespace.
     """
     parser = argparse.ArgumentParser(
-        description="Run a W&B Sweeps hyperparameter search for adapter time series forecasting.",
+        description="Run a W&B Sweeps hyperparameter search for finetune time series forecasting.",
     )
 
     parser.add_argument("--sweep-id", type=str, help="Existing W&B sweep ID to join.")
@@ -56,23 +56,71 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--cache-dir", type=str, default="data/cache", help="Directory with pre-computed cached datasets."
     )
+    parser.add_argument(
+        "--fusion-checkpoint-path",
+        type=str,
+        required=True,
+        help="Path to the fusion checkpoint used to initialize fusion weights before finetune training.",
+    )
     parser.add_argument("--seed", type=int, help="Random seed for reproducibility.")
 
     return parser.parse_args()
 
 
-def _create_adapter_model(model_config: ModelConfig, device: torch.device) -> MultimodalDecoder:
-    """Build a MultimodalDecoder with a pretrained adapter for adapter fine-tuning.
+def _parse_fusion_hparams(config: Any) -> tuple[int, list[int]]:
+    """Extract fusion MLP architecture from a W&B run config.
 
-    The fusion head is constructed from model_config but remains unused during
-    adapter training; only the adapter parameters are fine-tuned.
+    Args:
+        config: W&B run config object (wandb.run.config).
+
+    Returns:
+        (num_fusion_layers, fusion_hidden_dims) where fusion_hidden_dims
+        is empty for 1 layer, [dim] for 2 layers, and [dim1, dim2] for 3.
+
+    Raises:
+        ValueError: If num_fusion_layers is not in 1-3, or required hidden dim
+            keys are missing.
+    """
+    num_fusion_layers: int = config.get("num_fusion_layers", 1)
+    fusion_hidden_dims: list[int] = []
+    match num_fusion_layers:
+        case 1:
+            pass
+        case 2:
+            fusion_hidden_dim: int | None = config.get("fusion_hidden_dim", None)
+            if fusion_hidden_dim is None:
+                raise ValueError("fusion_hidden_dim is required when num_fusion_layers is 2")
+            fusion_hidden_dims = [fusion_hidden_dim]
+        case 3:
+            fusion_hidden_dim_1: int | None = config.get("fusion_hidden_dim_1", None)
+            fusion_hidden_dim_2: int | None = config.get("fusion_hidden_dim_2", None)
+            if fusion_hidden_dim_1 is None or fusion_hidden_dim_2 is None:
+                raise ValueError("fusion_hidden_dim_1 and fusion_hidden_dim_2 are required when num_fusion_layers is 3")
+            fusion_hidden_dims = [fusion_hidden_dim_1, fusion_hidden_dim_2]
+        case _:
+            raise ValueError(f"num_fusion_layers must be between 1 and 3, got {num_fusion_layers}")
+    return num_fusion_layers, fusion_hidden_dims
+
+
+def _create_finetune_model(
+    model_config: ModelConfig,
+    num_fusion_layers: int,
+    fusion_hidden_dims: list[int],
+    fusion_checkpoint_path: Path,
+    device: torch.device,
+) -> MultimodalDecoder:
+    """Build a MultimodalDecoder with fusion weights loaded from a prior fusion checkpoint.
 
     Args:
         model_config: Static model configuration (adapter repo, embedding dims).
+        num_fusion_layers: Number of linear layers in the fusion MLP.
+        fusion_hidden_dims: Hidden layer widths of the fusion MLP.
+        fusion_checkpoint_path: Path to a FusionCheckpoint whose fusion_state_dict
+            is used to initialize the fusion head before finetune training.
         device: Device to load the model onto.
 
     Returns:
-        MultimodalDecoder with a pretrained adapter ready for fine-tuning.
+        MultimodalDecoder with pretrained adapter and fusion weights loaded from the fusion checkpoint.
     """
     _logger.info(
         "Loading pretrained adapter from %s on %s",
@@ -95,10 +143,18 @@ def _create_adapter_model(model_config: ModelConfig, device: torch.device) -> Mu
         )
     config = MultimodalDecoderConfig(
         text_embedding_dims=model_config.fusion.text_embedding_dims,
-        num_fusion_layers=model_config.fusion.num_fusion_layers,
-        fusion_hidden_dims=model_config.fusion.fusion_hidden_dims,
+        num_fusion_layers=num_fusion_layers,
+        fusion_hidden_dims=fusion_hidden_dims,
     )
-    return MultimodalDecoder(adapter, config)
+    model = MultimodalDecoder(adapter, config).to(device)
+    _logger.info("Loading fusion weights from %s", fusion_checkpoint_path)
+    ckpt = cast(FusionCheckpoint, torch.load(fusion_checkpoint_path, weights_only=True, map_location=device))
+    model.fusion.load_state_dict(ckpt["fusion_state_dict"])
+    _logger.info(
+        "Fusion weights loaded (fusion sweep best_val_loss=%.6f)",
+        ckpt["best_val_loss"],
+    )
+    return model
 
 
 def _train_and_evaluate(
@@ -111,13 +167,14 @@ def _train_and_evaluate(
     test_domain_specs: list[DomainSpec],
     device: torch.device,
     cache_dir: Path,
+    fusion_checkpoint_path: Path,
 ) -> None:
-    """Run one sweep trial: fine-tune the adapter and log metrics to W&B.
+    """Run one sweep trial: finetune adapter + fusion and log metrics to W&B.
 
-    Reads hyperparameters from the active W&B run config, fine-tunes the
-    adapter, loads the best checkpoint, evaluates on the test set, and logs
-    val/best_loss, test/mse, and test/mae.
-    The checkpoint directory is removed after evaluation.
+    Reads hyperparameters from the active W&B run config, initializes the model
+    from the provided fusion checkpoint, trains in finetune mode, loads the best
+    checkpoint, evaluates on the test set, and logs val/best_loss, test/mse, and
+    test/mae. The checkpoint directory is removed after evaluation.
 
     Args:
         run: Active W&B run whose config provides this trial's hyperparameters.
@@ -129,17 +186,23 @@ def _train_and_evaluate(
         test_domain_specs: Domain specs used for test evaluation.
         device: Device to train and evaluate on.
         cache_dir: Directory containing pre-computed cached datasets.
+        fusion_checkpoint_path: Path to the fusion checkpoint for weight initialization before finetune training.
     """
     config = run.config
     _logger.info("Starting sweep run %s with config: %s", run.id, dict(config))
+
+    num_fusion_layers, fusion_hidden_dims = _parse_fusion_hparams(config)
 
     training_args = replace(
         base_training_args,
         per_device_train_batch_size=config.batch_size,
         num_train_epochs=config.num_epochs,
-        adapter_learning_rate=config.learning_rate,
+        adapter_learning_rate=config.adapter_learning_rate,
         adapter_lr_scheduler_type=config.lr_scheduler_type,
         adapter_warmup_steps=config.warmup_steps,
+        fusion_learning_rate=config.fusion_learning_rate,
+        fusion_lr_scheduler_type=config.lr_scheduler_type,
+        fusion_warmup_steps=config.warmup_steps,
         weight_decay=config.weight_decay,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
     )
@@ -161,26 +224,31 @@ def _train_and_evaluate(
         cache_dir=cache_dir,
     )
 
-    model = _create_adapter_model(model_config, device)
+    model = _create_finetune_model(
+        model_config,
+        num_fusion_layers,
+        fusion_hidden_dims,
+        fusion_checkpoint_path,
+        device,
+    )
 
     trainer = MultimodalTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         val_dataset=val_dataset,
-        mode="adapter",
+        mode="finetune",
         device=device,
         wandb_run=run,
     )
 
     trainer.train()
 
-    trial_best_checkpoint_path = training_args.checkpoint_dir / "best_model.pt"
-    _logger.info("Loading best checkpoint from %s", trial_best_checkpoint_path)
-    checkpoint = cast(
-        AdapterCheckpoint, torch.load(trial_best_checkpoint_path, weights_only=True)
-    )
+    best_checkpoint_path = training_args.checkpoint_dir / "best_model.pt"
+    _logger.info("Loading best checkpoint from %s", best_checkpoint_path)
+    checkpoint = cast(FinetuneCheckpoint, torch.load(best_checkpoint_path, weights_only=True, map_location=device))
     best_val_loss = checkpoint["best_val_loss"]
+    model.fusion.load_state_dict(checkpoint["fusion_state_dict"])
     model.adapter.load_state_dict(checkpoint["adapter_state_dict"])
 
     test_dataloader = cast(
@@ -190,7 +258,7 @@ def _train_and_evaluate(
             batch_size=training_args.per_device_eval_batch_size,
             shuffle=False,
             num_workers=0,
-            collate_fn=adapter_collate_fn,
+            collate_fn=multimodal_collate_fn,
             pin_memory=pin_memory(device),
         ),
     )
@@ -240,8 +308,13 @@ def main() -> int:
         forecast_config = ForecastConfig()
         _logger.info("Using default ForecastConfig")
 
+    fusion_checkpoint_path = Path(args.fusion_checkpoint_path)
+    if not fusion_checkpoint_path.exists():
+        _logger.error("Fusion checkpoint not found: %s", fusion_checkpoint_path)
+        return 1
+
     base_training_args = TrainingArguments(
-        output_dir="outputs/sweeps/adapter",
+        output_dir="outputs/sweeps/finetune",
         logging_strategy="epoch",
         eval_strategy="epoch",
         save_strategy="best",
@@ -270,7 +343,7 @@ def main() -> int:
     device = resolve_device()
     _logger.info("Using device: %s", device)
 
-    wandb_project = f"adapter-{model_config.adapter.type}-time-mmd"
+    wandb_project = f"finetune-{model_config.adapter.type}-time-mmd"
 
     def _sweep_fn() -> None:
         """Execute a single sweep trial inside a W&B run context."""
@@ -285,6 +358,7 @@ def main() -> int:
                 test_domain_specs=test_domain_specs,
                 device=device,
                 cache_dir=Path(args.cache_dir),
+                fusion_checkpoint_path=fusion_checkpoint_path,
             )
 
     if args.sweep_id:
