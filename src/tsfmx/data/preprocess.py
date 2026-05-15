@@ -57,6 +57,41 @@ class PreprocessPipeline:
             parts.append("aug")
         return self.cache_dir / ("_".join(parts) + ".pkl")
 
+    def find_entities(
+        self,
+        dataset_name: str,
+        text_encoder_type: str,
+        patch_len: int,
+        context_len: int,
+        horizon_len: int,
+        augment: bool = False,
+    ) -> set[str]:
+        """Discover entity names that have a cached file matching the given configuration.
+
+        Uses the same filename format as :meth:`get_path`, so the two stay in sync if the format ever changes.
+
+        Args:
+            dataset_name: Name of the dataset (e.g. 'time_mmd').
+            text_encoder_type: Text encoder type string.
+            patch_len: Patch length.
+            context_len: Context length.
+            horizon_len: Horizon length.
+            augment: Whether patch-boundary shift augmentation was applied.
+
+        Returns:
+            Set of entity strings found in the cache directory.
+        """
+        suffix_parts = [text_encoder_type, f"p{patch_len}", f"c{context_len}", f"h{horizon_len}"]
+        if augment:
+            suffix_parts.append("aug")
+        suffix = "_" + "_".join(suffix_parts)
+        prefix = f"{dataset_name}_"
+        entities: set[str] = set()
+        for path in self.cache_dir.glob(f"{prefix}*{suffix}.pkl"):
+            entity = path.stem.removeprefix(prefix).removesuffix(suffix)
+            entities.add(entity)
+        return entities
+
     def load(self, path: Path) -> list[PreprocessedSample]:
         _logger.info("Loading preprocessed data from %s", path)
         with open(path, "rb") as f:
