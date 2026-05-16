@@ -21,6 +21,25 @@ class PreprocessPipeline:
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _head_parts(dataset_name: str) -> list[str]:
+        """Build the filename components that precede the entity segment."""
+        return [dataset_name]
+
+    @staticmethod
+    def _tail_parts(
+        text_encoder_type: str,
+        patch_len: int,
+        context_len: int,
+        horizon_len: int,
+        augment: bool,
+    ) -> list[str]:
+        """Build the filename components that follow the entity segment."""
+        parts = [text_encoder_type, f"p{patch_len}", f"c{context_len}", f"h{horizon_len}"]
+        if augment:
+            parts.append("aug")
+        return parts
+
     def get_path(
         self,
         dataset_name: str,
@@ -46,15 +65,10 @@ class PreprocessPipeline:
             Path to the cache file.
         """
         parts = [
-            dataset_name,
+            *self._head_parts(dataset_name),
             entity,
-            text_encoder_type,
-            f"p{patch_len}",
-            f"c{context_len}",
-            f"h{horizon_len}",
+            *self._tail_parts(text_encoder_type, patch_len, context_len, horizon_len, augment),
         ]
-        if augment:
-            parts.append("aug")
         return self.cache_dir / ("_".join(parts) + ".pkl")
 
     def find_entities(
@@ -68,8 +82,6 @@ class PreprocessPipeline:
     ) -> set[str]:
         """Discover entity names that have a cached file matching the given configuration.
 
-        Uses the same filename format as :meth:`get_path`, so the two stay in sync if the format ever changes.
-
         Args:
             dataset_name: Name of the dataset (e.g. 'time_mmd').
             text_encoder_type: Text encoder type string.
@@ -81,11 +93,8 @@ class PreprocessPipeline:
         Returns:
             Set of entity strings found in the cache directory.
         """
-        suffix_parts = [text_encoder_type, f"p{patch_len}", f"c{context_len}", f"h{horizon_len}"]
-        if augment:
-            suffix_parts.append("aug")
-        suffix = "_" + "_".join(suffix_parts)
-        prefix = f"{dataset_name}_"
+        prefix = "_".join(self._head_parts(dataset_name)) + "_"
+        suffix = "_" + "_".join(self._tail_parts(text_encoder_type, patch_len, context_len, horizon_len, augment))
         entities: set[str] = set()
         for path in self.cache_dir.glob(f"{prefix}*{suffix}.pkl"):
             entity = path.stem.removeprefix(prefix).removesuffix(suffix)
