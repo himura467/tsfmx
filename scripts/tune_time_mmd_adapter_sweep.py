@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hyperparameter tuning for adapter (fine-tuned) time series forecasting with W&B Sweeps."""
+"""Hyperparameter tuning for adapter fine-tuning with W&B Sweeps."""
 
 import argparse
 import shutil
@@ -38,7 +38,7 @@ def _parse_args() -> argparse.Namespace:
         Parsed namespace.
     """
     parser = argparse.ArgumentParser(
-        description="Run a W&B Sweeps hyperparameter search for adapter time series forecasting.",
+        description="Run a W&B Sweeps hyperparameter search for adapter fine-tuning on Time-MMD.",
     )
 
     parser.add_argument("--sweep-id", type=str, help="Existing W&B sweep ID to join.")
@@ -177,9 +177,7 @@ def _train_and_evaluate(
 
     trial_best_checkpoint_path = training_args.checkpoint_dir / "best_model.pt"
     _logger.info("Loading best checkpoint from %s", trial_best_checkpoint_path)
-    checkpoint = cast(
-        AdapterCheckpoint, torch.load(trial_best_checkpoint_path, weights_only=True)
-    )
+    checkpoint = cast(AdapterCheckpoint, torch.load(trial_best_checkpoint_path, weights_only=True))
     best_val_loss = checkpoint["best_val_loss"]
     model.adapter.load_state_dict(checkpoint["adapter_state_dict"])
 
