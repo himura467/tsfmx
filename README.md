@@ -90,7 +90,7 @@ PYTHONPATH=. uv run python scripts/tune_time_mmd_adapter_sweep.py \
     --sweep-config examples/time_mmd/configs/sweeps/adapter.yml
 ```
 
-### 4. Finetune Hyperparameter Tuning
+### 4. Fine-tune Hyperparameter Tuning
 
 After fusion tuning, run a W&B Sweeps search for the finetune mode (adapter + fusion trained jointly), starting from the best fusion checkpoint:
 
