@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hyperparameter tuning for finetune (adapter + fusion) time series forecasting with W&B Sweeps."""
+"""Hyperparameter tuning for joint adapter + fusion fine-tuning with W&B Sweeps."""
 
 import argparse
 import shutil
@@ -38,7 +38,10 @@ def _parse_args() -> argparse.Namespace:
         Parsed namespace.
     """
     parser = argparse.ArgumentParser(
-        description="Run a W&B Sweeps hyperparameter search for finetune time series forecasting.",
+        description=(
+            "Run a W&B Sweeps hyperparameter search for joint adapter + fusion fine-tuning on Time-MMD. "
+            "Requires a fusion checkpoint from a prior fusion sweep run (tune_time_mmd_fusion_sweep.py)."
+        ),
     )
 
     parser.add_argument("--sweep-id", type=str, help="Existing W&B sweep ID to join.")
@@ -60,7 +63,7 @@ def _parse_args() -> argparse.Namespace:
         "--fusion-checkpoint-path",
         type=str,
         required=True,
-        help="Path to the fusion checkpoint used to initialize fusion weights before finetune training.",
+        help="Path to a FusionCheckpoint (best_model.pt from tune_time_mmd_fusion_sweep.py) used to initialize fusion weights.",
     )
     parser.add_argument("--seed", type=int, help="Random seed for reproducibility.")
 
@@ -116,7 +119,7 @@ def _create_finetune_model(
         num_fusion_layers: Number of linear layers in the fusion MLP.
         fusion_hidden_dims: Hidden layer widths of the fusion MLP.
         fusion_checkpoint_path: Path to a FusionCheckpoint whose fusion_state_dict
-            is used to initialize the fusion head before finetune training.
+            initializes the fusion head before joint fine-tuning.
         device: Device to load the model onto.
 
     Returns:
@@ -169,7 +172,7 @@ def _train_and_evaluate(
     cache_dir: Path,
     fusion_checkpoint_path: Path,
 ) -> None:
-    """Run one sweep trial: finetune adapter + fusion and log metrics to W&B.
+    """Run one sweep trial: jointly fine-tune adapter + fusion and log metrics to W&B.
 
     Reads hyperparameters from the active W&B run config, initializes the model
     from the provided fusion checkpoint, trains in finetune mode, loads the best
@@ -186,7 +189,8 @@ def _train_and_evaluate(
         test_domain_specs: Domain specs used for test evaluation.
         device: Device to train and evaluate on.
         cache_dir: Directory containing pre-computed cached datasets.
-        fusion_checkpoint_path: Path to the fusion checkpoint for weight initialization before finetune training.
+        fusion_checkpoint_path: Path to a FusionCheckpoint whose fusion_state_dict
+            initializes the fusion head before joint fine-tuning.
     """
     config = run.config
     _logger.info("Starting sweep run %s with config: %s", run.id, dict(config))

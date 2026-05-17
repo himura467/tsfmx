@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hyperparameter tuning for fusion (adapter frozen, fusion trained) time series forecasting with W&B Sweeps."""
+"""Hyperparameter tuning for fusion head training with W&B Sweeps (adapter frozen)."""
 
 import argparse
 import shutil
@@ -38,7 +38,7 @@ def _parse_args() -> argparse.Namespace:
         Parsed namespace.
     """
     parser = argparse.ArgumentParser(
-        description="Run a W&B Sweeps hyperparameter search for fusion time series forecasting.",
+        description="Run a W&B Sweeps hyperparameter search for fusion head training on Time-MMD (adapter frozen).",
     )
 
     parser.add_argument("--sweep-id", type=str, help="Existing W&B sweep ID to join.")
@@ -167,7 +167,7 @@ def _train_and_evaluate(
     best_state: dict[str, float],
     best_checkpoint_path: Path,
 ) -> None:
-    """Run one sweep trial: train the model and log metrics to W&B.
+    """Run one sweep trial: train the fusion head and log metrics to W&B.
 
     Reads hyperparameters from the active W&B run config, trains the fusion
     head, loads the best checkpoint, evaluates on the test set, and logs
