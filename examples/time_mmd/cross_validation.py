@@ -8,7 +8,7 @@ from torch.utils.data import ConcatDataset, Dataset
 
 from tsfmx.data.dataset import PreprocessedDataset
 from tsfmx.data.preprocess import PreprocessPipeline
-from tsfmx.types import PreprocessedSample
+from tsfmx.types import PreprocessedSample, TrainingMode
 
 
 @dataclass
@@ -33,6 +33,7 @@ def load_fold_datasets(
     context_len: int,
     horizon_len: int,
     cache_dir: Path,
+    mode: TrainingMode,
 ) -> tuple[ConcatDataset[PreprocessedSample], ConcatDataset[PreprocessedSample], ConcatDataset[PreprocessedSample]]:
     """Load cached datasets for a single fold from pre-computed cache.
 
@@ -45,6 +46,7 @@ def load_fold_datasets(
         context_len: Length of context.
         horizon_len: Length of horizon.
         cache_dir: Directory containing pre-computed cached datasets.
+        mode: Training mode passed to PreprocessedDataset.
 
     Returns:
         Tuple of (train_dataset, val_dataset, test_dataset).
@@ -63,16 +65,12 @@ def load_fold_datasets(
                 horizon_len=horizon_len,
                 augment=spec.augment,
             )
-            cached_data = cache.load(cache_path)
-            datasets.append(PreprocessedDataset(cached_data, mode="fusion"))
+            data = cache.load(cache_path)
+            datasets.append(PreprocessedDataset(data, mode=mode))
         return datasets
 
-    train_datasets = load_cached_domains(train_domain_specs)
-    val_datasets = load_cached_domains(val_domain_specs)
-    test_datasets = load_cached_domains(test_domain_specs)
-
     return (
-        ConcatDataset(train_datasets),
-        ConcatDataset(val_datasets),
-        ConcatDataset(test_datasets),
+        ConcatDataset(load_cached_domains(train_domain_specs)),
+        ConcatDataset(load_cached_domains(val_domain_specs)),
+        ConcatDataset(load_cached_domains(test_domain_specs)),
     )

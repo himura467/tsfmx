@@ -220,6 +220,7 @@ def _train_and_evaluate(
         context_len=forecast_config.context_len,
         horizon_len=forecast_config.horizon_len,
         cache_dir=cache_dir,
+        mode="fusion",
     )
 
     model = _create_fusion_model(
