@@ -57,13 +57,25 @@ def _parse_args() -> argparse.Namespace:
         "--cache-dir", type=str, default="data/cache", help="Directory with pre-computed cached datasets."
     )
     parser.add_argument(
-        "--best-checkpoint-path",
+        "--best-checkpoint-dir",
         type=str,
-        default="outputs/sweeps/fusion/best_fusion.pt",
-        help=(
-            "Path to save the best fusion checkpoint (lowest val loss) across all sweep trials "
-            "within this agent process. Not coordinated across multiple agents."
-        ),
+        default="outputs/sweeps/fusion/best_checkpoints",
+        help="Directory to save the best cross-trial checkpoints. Not coordinated across multiple agents.",
+    )
+    parser.add_argument(
+        "--keep-best-val-loss",
+        action="store_true",
+        help="Retain the cross-trial checkpoint with the lowest val_loss as best_val_loss.pt.",
+    )
+    parser.add_argument(
+        "--keep-best-test-mse",
+        action="store_true",
+        help="Retain the cross-trial checkpoint with the lowest test MSE as best_test_mse.pt.",
+    )
+    parser.add_argument(
+        "--keep-best-test-mae",
+        action="store_true",
+        help="Retain the cross-trial checkpoint with the lowest test MAE as best_test_mae.pt.",
     )
     parser.add_argument("--seed", type=int, help="Random seed for reproducibility.")
 
@@ -165,16 +177,18 @@ def _train_and_evaluate(
     device: torch.device,
     cache_dir: Path,
     best_state: dict[str, float],
-    best_checkpoint_path: Path,
+    best_checkpoint_dir: Path,
+    keep_best_val_loss: bool,
+    keep_best_test_mse: bool,
+    keep_best_test_mae: bool,
 ) -> None:
     """Run one sweep trial: train the fusion head and log metrics to W&B.
 
     Reads hyperparameters from the active W&B run config, trains the fusion
     head, loads the best checkpoint, evaluates on the test set, and logs
     val/best_loss, test/mse, and test/mae.
-    If this trial achieves a lower val loss than all previous trials within
-    this agent process, the best checkpoint is copied to best_checkpoint_path
-    before the trial directory is removed.
+    After evaluation, updates cross-trial best checkpoints for whichever
+    metrics are enabled before the trial directory is removed.
 
     Args:
         run: Active W&B run whose config provides this trial's hyperparameters.
@@ -186,8 +200,11 @@ def _train_and_evaluate(
         test_domain_specs: Domain specs used for test evaluation.
         device: Device to train and evaluate on.
         cache_dir: Directory containing pre-computed cached datasets.
-        best_state: Mutable dict with key "val_loss" tracking the best val loss seen so far.
-        best_checkpoint_path: Path where the overall best checkpoint is written.
+        best_state: Mutable dict tracking the best val_loss, test_mse, and test_mae seen so far.
+        best_checkpoint_dir: Directory where per-metric best checkpoints are written.
+        keep_best_val_loss: Whether to retain the cross-trial best val_loss checkpoint.
+        keep_best_test_mse: Whether to retain the cross-trial best test_mse checkpoint.
+        keep_best_test_mae: Whether to retain the cross-trial best test_mae checkpoint.
     """
     config = run.config
     _logger.info("Starting sweep run %s with config: %s", run.id, dict(config))
@@ -276,14 +293,25 @@ def _train_and_evaluate(
         step=trainer.global_step,
     )
 
-    if best_val_loss < best_state["val_loss"]:
+    if keep_best_val_loss and best_val_loss < best_state["val_loss"]:
         best_state["val_loss"] = best_val_loss
-        shutil.copy(trial_best_checkpoint_path, best_checkpoint_path)
-        _logger.info(
-            "New best fusion checkpoint saved to %s (val_loss=%.6f)",
-            best_checkpoint_path,
-            best_val_loss,
-        )
+        dest = best_checkpoint_dir / "best_val_loss.pt"
+        shutil.copy(trial_best_checkpoint_path, dest)
+        _logger.info("New best fusion checkpoint (val_loss) saved to %s (val_loss=%.6f)", dest, best_val_loss)
+
+    if keep_best_test_mse and test_metrics["mse"] < best_state["test_mse"]:
+        best_state["test_mse"] = test_metrics["mse"]
+        checkpoint["best_test_mse"] = test_metrics["mse"]
+        dest = best_checkpoint_dir / "best_test_mse.pt"
+        torch.save(checkpoint, dest)
+        _logger.info("New best fusion checkpoint (test_mse) saved to %s (test_mse=%.6f)", dest, test_metrics["mse"])
+
+    if keep_best_test_mae and test_metrics["mae"] < best_state["test_mae"]:
+        best_state["test_mae"] = test_metrics["mae"]
+        checkpoint["best_test_mae"] = test_metrics["mae"]
+        dest = best_checkpoint_dir / "best_test_mae.pt"
+        torch.save(checkpoint, dest)
+        _logger.info("New best fusion checkpoint (test_mae) saved to %s (test_mae=%.6f)", dest, test_metrics["mae"])
 
     checkpoint_dir = training_args.checkpoint_dir
     if checkpoint_dir.exists():
@@ -346,9 +374,10 @@ def main() -> int:
 
     wandb_project = f"fusion-{model_config.adapter.type}-time-mmd"
 
-    best_state: dict[str, float] = {"val_loss": float("inf")}
-    best_checkpoint_path = Path(args.best_checkpoint_path)
-    best_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    best_state: dict[str, float] = {"val_loss": float("inf"), "test_mse": float("inf"), "test_mae": float("inf")}
+    best_checkpoint_dir = Path(args.best_checkpoint_dir)
+    if args.keep_best_val_loss or args.keep_best_test_mse or args.keep_best_test_mae:
+        best_checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     def _sweep_fn() -> None:
         """Execute a single sweep trial inside a W&B run context."""
@@ -364,7 +393,10 @@ def main() -> int:
                 device=device,
                 cache_dir=Path(args.cache_dir),
                 best_state=best_state,
-                best_checkpoint_path=best_checkpoint_path,
+                best_checkpoint_dir=best_checkpoint_dir,
+                keep_best_val_loss=args.keep_best_val_loss,
+                keep_best_test_mse=args.keep_best_test_mse,
+                keep_best_test_mae=args.keep_best_test_mae,
             )
 
     if args.sweep_id:

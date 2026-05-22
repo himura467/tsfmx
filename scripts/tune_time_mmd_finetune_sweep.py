@@ -65,6 +65,27 @@ def _parse_args() -> argparse.Namespace:
         required=True,
         help="Path to a FusionCheckpoint (best_model.pt from tune_time_mmd_fusion_sweep.py) used to initialize fusion weights.",
     )
+    parser.add_argument(
+        "--best-checkpoint-dir",
+        type=str,
+        default="outputs/sweeps/finetune/best_checkpoints",
+        help="Directory to save the best cross-trial checkpoints. Not coordinated across multiple agents.",
+    )
+    parser.add_argument(
+        "--keep-best-val-loss",
+        action="store_true",
+        help="Retain the cross-trial checkpoint with the lowest val_loss as best_val_loss.pt.",
+    )
+    parser.add_argument(
+        "--keep-best-test-mse",
+        action="store_true",
+        help="Retain the cross-trial checkpoint with the lowest test MSE as best_test_mse.pt.",
+    )
+    parser.add_argument(
+        "--keep-best-test-mae",
+        action="store_true",
+        help="Retain the cross-trial checkpoint with the lowest test MAE as best_test_mae.pt.",
+    )
     parser.add_argument("--seed", type=int, help="Random seed for reproducibility.")
 
     return parser.parse_args()
@@ -171,13 +192,19 @@ def _train_and_evaluate(
     device: torch.device,
     cache_dir: Path,
     fusion_checkpoint_path: Path,
+    best_state: dict[str, float],
+    best_checkpoint_dir: Path,
+    keep_best_val_loss: bool,
+    keep_best_test_mse: bool,
+    keep_best_test_mae: bool,
 ) -> None:
     """Run one sweep trial: jointly fine-tune adapter + fusion and log metrics to W&B.
 
     Reads hyperparameters from the active W&B run config, initializes the model
     from the provided fusion checkpoint, trains in finetune mode, loads the best
     checkpoint, evaluates on the test set, and logs val/best_loss, test/mse, and
-    test/mae. The checkpoint directory is removed after evaluation.
+    test/mae. After evaluation, updates cross-trial best checkpoints for whichever
+    metrics are enabled before the trial directory is removed.
 
     Args:
         run: Active W&B run whose config provides this trial's hyperparameters.
@@ -191,6 +218,11 @@ def _train_and_evaluate(
         cache_dir: Directory containing pre-computed cached datasets.
         fusion_checkpoint_path: Path to a FusionCheckpoint whose fusion_state_dict
             initializes the fusion head before joint fine-tuning.
+        best_state: Mutable dict tracking the best val_loss, test_mse, and test_mae seen so far.
+        best_checkpoint_dir: Directory where per-metric best checkpoints are written.
+        keep_best_val_loss: Whether to retain the cross-trial best val_loss checkpoint.
+        keep_best_test_mse: Whether to retain the cross-trial best test_mse checkpoint.
+        keep_best_test_mae: Whether to retain the cross-trial best test_mae checkpoint.
     """
     config = run.config
     _logger.info("Starting sweep run %s with config: %s", run.id, dict(config))
@@ -284,6 +316,26 @@ def _train_and_evaluate(
         step=trainer.global_step,
     )
 
+    if keep_best_val_loss and best_val_loss < best_state["val_loss"]:
+        best_state["val_loss"] = best_val_loss
+        dest = best_checkpoint_dir / "best_val_loss.pt"
+        shutil.copy(best_checkpoint_path, dest)
+        _logger.info("New best finetune checkpoint (val_loss) saved to %s (val_loss=%.6f)", dest, best_val_loss)
+
+    if keep_best_test_mse and test_metrics["mse"] < best_state["test_mse"]:
+        best_state["test_mse"] = test_metrics["mse"]
+        checkpoint["best_test_mse"] = test_metrics["mse"]
+        dest = best_checkpoint_dir / "best_test_mse.pt"
+        torch.save(checkpoint, dest)
+        _logger.info("New best finetune checkpoint (test_mse) saved to %s (test_mse=%.6f)", dest, test_metrics["mse"])
+
+    if keep_best_test_mae and test_metrics["mae"] < best_state["test_mae"]:
+        best_state["test_mae"] = test_metrics["mae"]
+        checkpoint["best_test_mae"] = test_metrics["mae"]
+        dest = best_checkpoint_dir / "best_test_mae.pt"
+        torch.save(checkpoint, dest)
+        _logger.info("New best finetune checkpoint (test_mae) saved to %s (test_mae=%.6f)", dest, test_metrics["mae"])
+
     checkpoint_dir = training_args.checkpoint_dir
     if checkpoint_dir.exists():
         _logger.info("Removing checkpoint directory %s", checkpoint_dir)
@@ -350,6 +402,11 @@ def main() -> int:
 
     wandb_project = f"finetune-{model_config.adapter.type}-time-mmd"
 
+    best_state: dict[str, float] = {"val_loss": float("inf"), "test_mse": float("inf"), "test_mae": float("inf")}
+    best_checkpoint_dir = Path(args.best_checkpoint_dir)
+    if args.keep_best_val_loss or args.keep_best_test_mse or args.keep_best_test_mae:
+        best_checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
     def _sweep_fn() -> None:
         """Execute a single sweep trial inside a W&B run context."""
         with wandb.init(project=wandb_project) as run:
@@ -364,6 +421,11 @@ def main() -> int:
                 device=device,
                 cache_dir=Path(args.cache_dir),
                 fusion_checkpoint_path=fusion_checkpoint_path,
+                best_state=best_state,
+                best_checkpoint_dir=best_checkpoint_dir,
+                keep_best_val_loss=args.keep_best_val_loss,
+                keep_best_test_mse=args.keep_best_test_mse,
+                keep_best_test_mae=args.keep_best_test_mae,
             )
 
     if args.sweep_id:

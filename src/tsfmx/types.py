@@ -45,6 +45,8 @@ class CheckpointBase(TypedDict):
     epoch: int
     global_step: int
     best_val_loss: float
+    best_test_mse: NotRequired[float]
+    best_test_mae: NotRequired[float]
 
 
 class FusionCheckpoint(CheckpointBase):
