@@ -250,18 +250,16 @@ def _train_and_evaluate(
 
     if keep_best_test_mse and test_metrics["mse"] < best_state["test_mse"]:
         best_state["test_mse"] = test_metrics["mse"]
-        ckpt = cast(AdapterCheckpoint, torch.load(trial_best_checkpoint_path, weights_only=True))
-        ckpt["best_test_mse"] = test_metrics["mse"]
+        checkpoint["best_test_mse"] = test_metrics["mse"]
         dest = best_checkpoint_dir / "best_test_mse.pt"
-        torch.save(ckpt, dest)
+        torch.save(checkpoint, dest)
         _logger.info("New best adapter checkpoint (test_mse) saved to %s (test_mse=%.6f)", dest, test_metrics["mse"])
 
     if keep_best_test_mae and test_metrics["mae"] < best_state["test_mae"]:
         best_state["test_mae"] = test_metrics["mae"]
-        ckpt = cast(AdapterCheckpoint, torch.load(trial_best_checkpoint_path, weights_only=True))
-        ckpt["best_test_mae"] = test_metrics["mae"]
+        checkpoint["best_test_mae"] = test_metrics["mae"]
         dest = best_checkpoint_dir / "best_test_mae.pt"
-        torch.save(ckpt, dest)
+        torch.save(checkpoint, dest)
         _logger.info("New best adapter checkpoint (test_mae) saved to %s (test_mae=%.6f)", dest, test_metrics["mae"])
 
     checkpoint_dir = training_args.checkpoint_dir
