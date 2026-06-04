@@ -2128,6 +2128,7 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
+    { name = "matplotlib" },
     { name = "wandb" },
 ]
 sweep = [
@@ -2150,6 +2151,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "chronos-forecasting", specifier = ">=2.2.2" },
+    { name = "matplotlib", marker = "extra == 'all'", specifier = ">=3.10.9" },
     { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.10.9" },
     { name = "numpy", specifier = ">=2.4.2" },
     { name = "pandas", specifier = ">=2.3.1" },
@@ -2162,7 +2164,7 @@ requires-dist = [
     { name = "wandb", marker = "extra == 'all'", specifier = ">=0.25.0" },
     { name = "wandb", marker = "extra == 'sweep'", specifier = ">=0.25.0" },
 ]
-provides-extras = ["sweep", "all", "viz"]
+provides-extras = ["sweep", "viz", "all"]
 
 [package.metadata.requires-dev]
 dev = [

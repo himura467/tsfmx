@@ -37,6 +37,7 @@ viz = [
     "matplotlib>=3.10.9",
 ]
 all = [
+    "matplotlib>=3.10.9",
     "wandb>=0.25.0",
 ]
 
