@@ -1,6 +1,8 @@
 """Multimodal decoder for time series forecasting with text fusion."""
 
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 import torch
 from torch import nn
@@ -35,6 +37,39 @@ class MultimodalDecoder(nn.Module):
             num_layers=config.num_fusion_layers,
             hidden_dims=config.fusion_hidden_dims,
         )
+
+    def load_checkpoint(self, path: Path) -> None:
+        """Load a training checkpoint, auto-detecting the checkpoint type.
+
+        Supports all three training modes (fusion, finetune, and adapter) by
+        inspecting which state-dict keys are present in the file.
+
+        Args:
+            path: Path to a .pt checkpoint file.
+
+        Raises:
+            FileNotFoundError: If path does not exist.
+            ValueError: If the checkpoint format cannot be recognized.
+        """
+        if not path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {path}")
+
+        checkpoint: dict[str, Any] = torch.load(path, weights_only=True)
+        loaded = False
+
+        if "fusion_state_dict" in checkpoint:
+            self.fusion.load_state_dict(checkpoint["fusion_state_dict"])
+            loaded = True
+
+        if "adapter_state_dict" in checkpoint:
+            self.adapter.load_state_dict(checkpoint["adapter_state_dict"])
+            loaded = True
+
+        if not loaded:
+            raise ValueError(
+                f"Unrecognized checkpoint format in {path!r}. "
+                "Expected at least one of 'fusion_state_dict' or 'adapter_state_dict'."
+            )
 
     def forward_full(
         self,
