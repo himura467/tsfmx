@@ -179,7 +179,7 @@ def main() -> int:
     visualizer = PredictionVisualizer(
         model=model,
         device=device,
-        fig_size=(16, 9),
+        figsize=(16, 9),
         max_samples=args.max_samples,
         output_dir=output_dir,
     )

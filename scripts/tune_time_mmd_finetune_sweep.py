@@ -172,7 +172,7 @@ def _create_finetune_model(
     )
     model = MultimodalDecoder(adapter, config).to(device)
     _logger.info("Loading fusion weights from %s", fusion_checkpoint_path)
-    ckpt = cast(FusionCheckpoint, torch.load(fusion_checkpoint_path, weights_only=True, map_location=device))
+    ckpt = cast(FusionCheckpoint, torch.load(fusion_checkpoint_path, weights_only=True))
     model.fusion.load_state_dict(ckpt["fusion_state_dict"])
     _logger.info(
         "Fusion weights loaded (fusion sweep best_val_loss=%.6f)",
@@ -283,7 +283,7 @@ def _train_and_evaluate(
 
     best_checkpoint_path = training_args.checkpoint_dir / "best_model.pt"
     _logger.info("Loading best checkpoint from %s", best_checkpoint_path)
-    checkpoint = cast(FinetuneCheckpoint, torch.load(best_checkpoint_path, weights_only=True, map_location=device))
+    checkpoint = cast(FinetuneCheckpoint, torch.load(best_checkpoint_path, weights_only=True))
     best_val_loss = checkpoint["best_val_loss"]
     model.fusion.load_state_dict(checkpoint["fusion_state_dict"])
     model.adapter.load_state_dict(checkpoint["adapter_state_dict"])

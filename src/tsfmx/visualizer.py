@@ -25,7 +25,7 @@ class PredictionVisualizer:
         self,
         model: MultimodalDecoder,
         device: torch.device,
-        fig_size: tuple[float, float],
+        figsize: tuple[float, float],
         max_samples: int | None = None,
         output_dir: Path | None = None,
     ) -> None:
@@ -34,7 +34,7 @@ class PredictionVisualizer:
         Args:
             model: Trained MultimodalDecoder model.
             device: Device to run inference on.
-            fig_size: (width, height) in inches per figure.
+            figsize: (width, height) in inches per figure.
             max_samples: Max samples plotted per split. None plots all samples.
             output_dir: Directory to save plot PNGs (one sub-directory per split). None to skip saving.
 
@@ -51,7 +51,7 @@ class PredictionVisualizer:
 
         self.model = model
         self.device = device
-        self.fig_size = fig_size
+        self.figsize = figsize
         self.max_samples = max_samples
         self.output_dir = output_dir
 
@@ -119,7 +119,7 @@ class PredictionVisualizer:
                     if self.max_samples is not None and sample_idx >= self.max_samples:
                         return figures
 
-                    fig, ax = plt.subplots(fig_size=self.fig_size)
+                    fig, ax = plt.subplots(figsize=self.figsize)
                     self._draw(ax, context_np[i], horizon_np[i], forecast_np[i], sample_idx, split_name)
 
                     if split_dir is not None:
