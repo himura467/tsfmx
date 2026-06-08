@@ -59,8 +59,7 @@ Run a W&B Sweeps search for the fusion mode (adapter frozen, fusion layer traine
 ```sh
 PYTHONPATH=. uv run python scripts/tune_time_mmd_fusion_sweep.py \
     --model-config examples/time_mmd/configs/models/timesfm.yml \
-    --sweep-config examples/time_mmd/configs/sweeps/fusion_1layer.yml \
-    --best-checkpoint-path outputs/sweeps/fusion/best_fusion_timesfm.pt
+    --sweep-config examples/time_mmd/configs/sweeps/fusion_3layers.yml
 ```
 
 **Chronos**:
@@ -68,8 +67,7 @@ PYTHONPATH=. uv run python scripts/tune_time_mmd_fusion_sweep.py \
 ```sh
 PYTHONPATH=. uv run python scripts/tune_time_mmd_fusion_sweep.py \
     --model-config examples/time_mmd/configs/models/chronos.yml \
-    --sweep-config examples/time_mmd/configs/sweeps/fusion_1layer.yml \
-    --best-checkpoint-path outputs/sweeps/fusion/best_fusion_chronos.pt
+    --sweep-config examples/time_mmd/configs/sweeps/fusion_3layers.yml
 ```
 
 To run the adapter mode (adapter fine-tuned, no fusion):
@@ -100,7 +98,7 @@ After fusion tuning, run a W&B Sweeps search for the finetune mode (adapter + fu
 PYTHONPATH=. uv run python scripts/tune_time_mmd_finetune_sweep.py \
     --model-config examples/time_mmd/configs/models/timesfm.yml \
     --sweep-config examples/time_mmd/configs/sweeps/finetune_1layer.yml \
-    --fusion-checkpoint-path outputs/sweeps/fusion/best_fusion_timesfm.pt
+    --fusion-checkpoint-path outputs/sweeps/fusion/best_checkpoints/best_val_loss.pt
 ```
 
 **Chronos**:
@@ -109,8 +107,32 @@ PYTHONPATH=. uv run python scripts/tune_time_mmd_finetune_sweep.py \
 PYTHONPATH=. uv run python scripts/tune_time_mmd_finetune_sweep.py \
     --model-config examples/time_mmd/configs/models/chronos.yml \
     --sweep-config examples/time_mmd/configs/sweeps/finetune_1layer.yml \
-    --fusion-checkpoint-path outputs/sweeps/fusion/best_fusion_chronos.pt
+    --fusion-checkpoint-path outputs/sweeps/fusion/best_checkpoints/best_val_loss.pt
 ```
+
+### 5. Visualize Forecasts
+
+After training, generate per-sample forecast plots from a saved checkpoint:
+
+**TimesFM**:
+
+```sh
+PYTHONPATH=. uv run python scripts/visualize_time_mmd_predictions.py \
+    --model-config examples/time_mmd/configs/models/timesfm.yml \
+    --checkpoint-path outputs/sweeps/fusion/best_checkpoints/best_val_loss.pt \
+    --output-dir outputs/visualizations/timesfm
+```
+
+**Chronos**:
+
+```sh
+PYTHONPATH=. uv run python scripts/visualize_time_mmd_predictions.py \
+    --model-config examples/time_mmd/configs/models/chronos.yml \
+    --checkpoint-path outputs/sweeps/fusion/best_checkpoints/best_val_loss.pt \
+    --output-dir outputs/visualizations/chronos
+```
+
+Use `--max-samples N` to limit the number of plots per split, and `--splits train val test` to select which splits to visualize.
 
 ## Acknowledgments
 
