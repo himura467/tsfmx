@@ -12,3 +12,10 @@ else
   git clone --depth 1 https://github.com/AdityaLab/MM-TSFlib.git "$MM_DIR"
   echo "MM-TSFlib cloned to $MM_DIR."
 fi
+
+RAR="$MM_DIR/data/Environment/NewYork_AQI_Day.rar"
+CSV="$MM_DIR/data/Environment/NewYork_AQI_Day.csv"
+if [[ -f "$RAR" && ! -f "$CSV" ]]; then
+  bsdtar -xf "$RAR" -C "$MM_DIR/data/Environment/"
+  echo "Extracted Environment data."
+fi
