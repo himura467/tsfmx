@@ -31,6 +31,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--data-path", type=str, default="data/Time-MMD")
     parser.add_argument("--train-ratio", type=float, required=True)
     parser.add_argument("--val-ratio", type=float, required=True)
+    parser.add_argument("--context-len", type=int, default=32)
     parser.add_argument("--domains", type=str, nargs="+")
     parser.add_argument("--force-rebuild", action="store_true", help="Overwrite existing split files.")
 
@@ -42,17 +43,10 @@ def _split_numerical(
     domain: str,
     train_ratio: float,
     val_ratio: float,
+    context_len: int,
     force_rebuild: bool,
 ) -> None:
-    """Split a domain's numerical CSV into train / val / test subsets.
-
-    Args:
-        numerical_dir: Path to the numerical/ directory.
-        domain: Domain name.
-        train_ratio: Fraction of rows for the training split.
-        val_ratio: Fraction of rows for the validation split.
-        force_rebuild: Overwrite existing split files when True.
-    """
+    """Split a domain's numerical CSV into train / val / test subsets with context overlap."""
     src = numerical_dir / domain / f"{domain}.csv"
     if not src.exists():
         _logger.warning("Numerical file not found, skipping: %s", src)
@@ -70,8 +64,8 @@ def _split_numerical(
     val_end = int(n * (train_ratio + val_ratio))
     slices: dict[Split, pd.DataFrame] = {
         "train": df.iloc[:train_end],
-        "val": df.iloc[train_end:val_end],
-        "test": df.iloc[val_end:],
+        "val": df.iloc[max(0, train_end - context_len) : val_end],
+        "test": df.iloc[max(0, val_end - context_len) :],
     }
 
     for split in _SPLITS:
@@ -150,10 +144,11 @@ def main() -> int:
     test_ratio = 1.0 - args.train_ratio - args.val_ratio
     _logger.info("Domains: %s", domains)
     _logger.info("Ratios — train: %s, val: %s, test: %.2f", args.train_ratio, args.val_ratio, test_ratio)
+    _logger.info("Context overlap prefix: %d rows", args.context_len)
 
     for domain in domains:
         _logger.info("Processing domain: %s", domain)
-        _split_numerical(numerical_dir, domain, args.train_ratio, args.val_ratio, args.force_rebuild)
+        _split_numerical(numerical_dir, domain, args.train_ratio, args.val_ratio, args.context_len, args.force_rebuild)
         _duplicate_textual(textual_dir, domain, args.force_rebuild)
 
     _logger.info("All domains processed successfully")

@@ -214,3 +214,6 @@ wandb/
 
 # Time-MMD dataset (cloned via scripts/clone_time_mmd.sh)
 data/Time-MMD/
+
+# External repos
+third_party/

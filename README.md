@@ -22,8 +22,8 @@ Split the dataset into train / val / test:
 
 ```sh
 PYTHONPATH=. uv run python scripts/split_time_mmd_datasets.py \
-    --train-ratio 0.6 \
-    --val-ratio 0.2
+    --train-ratio 0.7 \
+    --val-ratio 0.1
 ```
 
 ### 2. Pre-compute Text Embeddings
@@ -133,6 +133,36 @@ PYTHONPATH=. uv run python scripts/visualize_time_mmd_predictions.py \
 ```
 
 Use `--max-samples N` to limit the number of plots per split, and `--splits train val test` to select which splits to visualize.
+
+## Benchmark Comparison with MM-TSFlib
+
+[MM-TSFlib](https://github.com/AdityaLab/MM-TSFlib) is cloned under `third_party/MM-TSFlib` (not tracked by git). MM-TSFlib is run on its own pre-processed Time-MMD CSVs; tsfmx is evaluated on the raw Time-MMD data split 70/10/20. Both cover the same underlying domains and split ratio.
+
+```sh
+./scripts/setup_mm_tsflib.sh
+```
+
+### 1. Run MM-TSFlib benchmark
+
+```sh
+./scripts/run_mm_tsflib_benchmark.sh 0 Autoformer YOUR_HF_TOKEN
+```
+
+Requires a HuggingFace token with access to LLaMA 3.
+
+### 2. Evaluate tsfmx checkpoint
+
+```sh
+PYTHONPATH=. uv run python scripts/eval_tsfmx_checkpoint.py \
+    --model-config examples/time_mmd/configs/models/timesfm.yml \
+    --checkpoint-path outputs/sweeps/fusion/best_checkpoints/best_val_loss.pt
+```
+
+### 3. Compare results
+
+```sh
+PYTHONPATH=. uv run python scripts/compare_benchmark_results.py
+```
 
 ## Acknowledgments
 

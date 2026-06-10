@@ -36,8 +36,12 @@ sweep = [
 viz = [
     "matplotlib>=3.10.9",
 ]
+bench = [
+    "scikit-learn>=1.8.0",
+]
 all = [
     "matplotlib>=3.10.9",
+    "scikit-learn>=1.8.0",
     "wandb>=0.25.0",
 ]
 
