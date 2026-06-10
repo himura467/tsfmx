@@ -1916,12 +1916,16 @@ wheels = [
 
 [[package]]
 name = "timesfm"
-version = "2.0.0"
-source = { git = "https://github.com/google-research/timesfm#8a755c9c755fd5b1fe2f0c8af3b86d7a5b846160" }
+version = "2.0.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub", extra = ["cli"] },
     { name = "numpy" },
     { name = "safetensors" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/a0/39148b2d692376d1e8d5969fadf7e7565c10e4505b4de197115c38270f65/timesfm-2.0.1.tar.gz", hash = "sha256:3d8f65a9acc9e0471fd7891c7f4be75b96d5e528a208fdc945983363f8302bb1", size = 43827, upload-time = "2026-06-08T17:21:24.193Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2c/97/e0bfa90617be01e1a789cc04e912f0129b316d8caaa4b72b014a19319af6/timesfm-2.0.1-py3-none-any.whl", hash = "sha256:0da183f218c5f59a9695abd73cb571b8cc90e4bd52d9d8017fb722f2ea3d93d8", size = 44714, upload-time = "2026-06-08T17:21:23.17Z" },
 ]
 
 [package.optional-dependencies]
@@ -2165,7 +2169,7 @@ requires-dist = [
     { name = "scikit-learn", marker = "extra == 'bench'", specifier = ">=1.8.0" },
     { name = "sentence-transformers", specifier = ">=5.1.0" },
     { name = "sentencepiece", specifier = ">=0.2.1" },
-    { name = "timesfm", extras = ["torch"], git = "https://github.com/google-research/timesfm" },
+    { name = "timesfm", extras = ["torch"], specifier = ">=2.0.1" },
     { name = "torch", marker = "sys_platform != 'linux'", specifier = ">=2.8.0", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torch", marker = "sys_platform == 'linux'", specifier = ">=2.8.0", index = "https://download.pytorch.org/whl/cu130" },
     { name = "wandb", marker = "extra == 'all'", specifier = ">=0.25.0" },
@@ -2311,9 +2315,9 @@ wheels = [
 
 [[package]]
 name = "wcwidth"
-version = "0.6.0"
+version = "0.8.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/35/a2/8e3becb46433538a38726c948d3399905a4c7cabd0df578ede5dc51f0ec2/wcwidth-0.6.0.tar.gz", hash = "sha256:cdc4e4262d6ef9a1a57e018384cbeb1208d8abbc64176027e2c2455c81313159", size = 159684, upload-time = "2026-02-06T19:19:40.919Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/b4/51fe890511f0f242d07cb1ebe6a5b6db417262b9d2568b460347c57d95cc/wcwidth-0.8.1.tar.gz", hash = "sha256:faf5b4a5366a72dc49cad48cdf21f52bdf63bdda995178e483ba247ff79089b9", size = 1466072, upload-time = "2026-06-08T05:57:23.146Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/68/5a/199c59e0a824a3db2b89c5d2dade7ab5f9624dbf6448dc291b46d5ec94d3/wcwidth-0.6.0-py3-none-any.whl", hash = "sha256:1a3a1e510b553315f8e146c54764f4fb6264ffad731b3d78088cdb1478ffbdad", size = 94189, upload-time = "2026-02-06T19:19:39.646Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/6e/95b0e537de1f4d4301f76f944642c6da50d1511cc7b3d64dc418a66c7509/wcwidth-0.8.1-py3-none-any.whl", hash = "sha256:f453740b1e4a4f3291faa37944c555d71056c4da08d59809b307ef4feba695c8", size = 323092, upload-time = "2026-06-08T05:57:21.413Z" },
 ]
