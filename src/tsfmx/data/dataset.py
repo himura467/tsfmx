@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 
 from torch.utils.data import Dataset
+from typing_extensions import override
 
 from tsfmx.types import PreprocessedSample, RawSample, TrainingMode
 
@@ -10,6 +11,7 @@ from tsfmx.types import PreprocessedSample, RawSample, TrainingMode
 class MultimodalDatasetBase(Dataset[RawSample], ABC):
     """Abstract base class for multimodal time series datasets."""
 
+    @override
     @abstractmethod
     def __getitem__(self, index: int) -> RawSample: ...
 
@@ -36,6 +38,7 @@ class PreprocessedDataset(Dataset[PreprocessedSample]):
         if self.mode in ("fusion", "finetune") and not all("text_embeddings" in s for s in self.data):
             raise ValueError(f"All samples must contain 'text_embeddings' for {self.mode!r} mode")
 
+    @override
     def __getitem__(self, index: int) -> PreprocessedSample:
         return self.data[index]
 

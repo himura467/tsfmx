@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import torch
 from huggingface_hub import hf_hub_download
+from typing_extensions import override
 from safetensors.torch import load_file
 from timesfm.timesfm_2p5.timesfm_2p5_torch import TimesFM_2p5_200M_torch_module
 from timesfm.torch.util import revin, update_running_stats
@@ -19,18 +20,22 @@ class TimesFM2p5Adapter(TsfmAdapter):
         super().__init__()
         self._model = TimesFM_2p5_200M_torch_module()
 
+    @override
     @property
     def model_dims(self) -> int:
         return self._model.md
 
+    @override
     @property
     def patch_len(self) -> int:
         return self._model.p
 
+    @override
     @property
     def point_forecast_index(self) -> int:
         return self._model.config.decode_index
 
+    @override
     def preprocess(
         self,
         inputs: torch.Tensor,
@@ -80,6 +85,7 @@ class TimesFM2p5Adapter(TsfmAdapter):
             },
         )
 
+    @override
     def forward(
         self,
         input_embeddings: torch.Tensor,
@@ -95,6 +101,7 @@ class TimesFM2p5Adapter(TsfmAdapter):
             output_embeddings, _ = layer(output_embeddings, masks[..., -1], None)
         return output_embeddings
 
+    @override
     def postprocess(
         self,
         horizon: int,
@@ -155,10 +162,12 @@ class TimesFM2p5Adapter(TsfmAdapter):
         instance.load_checkpoint(checkpoint_path)
         return instance
 
+    @override
     def freeze_parameters(self) -> None:
         for param in self.parameters():
             param.requires_grad = False
 
+    @override
     def unfreeze_parameters(self) -> None:
         for param in self.parameters():
             param.requires_grad = True

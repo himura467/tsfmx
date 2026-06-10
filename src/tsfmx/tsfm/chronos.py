@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import cast
 
+from typing_extensions import override
+
 import torch
 from chronos import Chronos2Model
 from huggingface_hub import hf_hub_download
@@ -20,18 +22,22 @@ class Chronos2Adapter(TsfmAdapter):
         super().__init__()
         self._model = model
 
+    @override
     @property
     def model_dims(self) -> int:
         return self._model.model_dim
 
+    @override
     @property
     def patch_len(self) -> int:
         return self._model.chronos_config.input_patch_size
 
+    @override
     @property
     def point_forecast_index(self) -> int:
         return list(self._model.chronos_config.quantiles).index(0.5)
 
+    @override
     def preprocess(
         self,
         inputs: torch.Tensor,
@@ -59,6 +65,7 @@ class Chronos2Adapter(TsfmAdapter):
             normalization_stats={"loc": loc, "scale": scale},
         )
 
+    @override
     def forward(
         self,
         input_embeddings: torch.Tensor,
@@ -125,6 +132,7 @@ class Chronos2Adapter(TsfmAdapter):
         hidden_states: torch.Tensor = encoder_outputs[0]
         return hidden_states[:, -num_output_patches:]
 
+    @override
     def postprocess(
         self,
         horizon: int,
@@ -198,10 +206,12 @@ class Chronos2Adapter(TsfmAdapter):
         instance.load_checkpoint(checkpoint_path)
         return instance
 
+    @override
     def freeze_parameters(self) -> None:
         for param in self.parameters():
             param.requires_grad = False
 
+    @override
     def unfreeze_parameters(self) -> None:
         for param in self.parameters():
             param.requires_grad = True

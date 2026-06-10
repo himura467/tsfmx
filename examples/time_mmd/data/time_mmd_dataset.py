@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from typing_extensions import override
 
 from examples.time_mmd.configs.domain_columns import DEFAULT_TIME_MMD_CONFIGS, DomainColumnConfig
 from tsfmx.data.dataset import MultimodalDatasetBase
@@ -396,10 +397,12 @@ class TimeMmdDataset(MultimodalDatasetBase):
         domains.sort()
         return domains
 
+    @override
     def __getitem__(self, index: int) -> RawSample:
         if index >= len(self.data):
             raise IndexError(f"Index {index} out of range for dataset of size {len(self.data)}")
         return self.data[index]
 
+    @override
     def __len__(self) -> int:
         return len(self.data)

@@ -2,6 +2,7 @@
 
 import torch
 from torch import nn
+from typing_extensions import override
 
 
 class MultimodalFusion(nn.Module):
@@ -41,6 +42,7 @@ class MultimodalFusion(nn.Module):
                 f"hidden_dims must have {num_layers - 1} elements for {num_layers} layers, got {len(hidden_dims)}"
             )
 
+    @override
     def forward(self, ts_embeddings: torch.Tensor, text_embeddings: torch.Tensor) -> torch.Tensor:
         """Project text_embeddings to ts_embedding_dims and add to ts_embeddings."""
         projected: torch.Tensor = self.projection(text_embeddings)
