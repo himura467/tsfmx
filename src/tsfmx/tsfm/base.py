@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import torch
 from torch import nn
+from typing_extensions import override
 
 
 @dataclass
@@ -53,6 +54,7 @@ class TsfmAdapter(nn.Module, ABC):
         masks: torch.Tensor,
     ) -> PreprocessResult: ...
 
+    @override
     @abstractmethod
     def forward(
         self,

@@ -3,6 +3,7 @@
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
+from typing_extensions import override
 
 from tsfmx.text_encoder.base import TextEncoderBase
 
@@ -35,6 +36,7 @@ class JapaneseTextEncoder(TextEncoderBase):
         if actual_dim != self.embedding_dim:
             raise ValueError(f"Embedding dimension mismatch: expected {self.embedding_dim}, got {actual_dim}.")
 
+    @override
     def forward(self, texts: str | list[str] | np.ndarray) -> torch.Tensor:
         """Encode texts into embeddings.
 
@@ -46,10 +48,12 @@ class JapaneseTextEncoder(TextEncoderBase):
         """
         return self.sentence_transformer.encode(texts, convert_to_tensor=True)
 
+    @override
     def freeze_parameters(self) -> None:
         for param in self.parameters():
             param.requires_grad = False
 
+    @override
     def unfreeze_parameters(self) -> None:
         for param in self.parameters():
             param.requires_grad = True

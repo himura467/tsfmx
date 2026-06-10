@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from typing_extensions import override
+
 import torch
 from torch import nn
 
@@ -115,6 +117,7 @@ class MultimodalDecoder(nn.Module):
         output_embeddings = self.adapter(embeddings, preprocessed.masks)
         return self.adapter.postprocess(horizon, output_embeddings, preprocessed.normalization_stats)
 
+    @override
     def forward(
         self,
         horizon: int,

@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 import torch
 from torch import nn
+from typing_extensions import override
 
 from tsfmx.utils.device import resolve_device
 
@@ -23,6 +24,7 @@ class TextEncoderBase(nn.Module, ABC):
         self.embedding_dim = embedding_dim
         self.device = resolve_device(device)
 
+    @override
     @abstractmethod
     def forward(self, texts: str | list[str] | np.ndarray) -> torch.Tensor: ...
 
