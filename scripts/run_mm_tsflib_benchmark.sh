@@ -64,4 +64,4 @@ for domain in "${!DOMAIN_FILES[@]}"; do
         --huggingface_token "$HF_TOKEN"
 done
 
-echo "Done. Results in $MM_DIR/result_tsfmx_comparison"
+echo "Done. Results in $MM_DIR/result_longterm_forecast"
