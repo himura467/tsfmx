@@ -145,7 +145,7 @@ Use `--max-samples N` to limit the number of plots per split, and `--splits trai
 ### 1. Run MM-TSFlib benchmark
 
 ```sh
-./scripts/run_mm_tsflib_benchmark.sh 0 Autoformer <HF_TOKEN>
+./scripts/run_mm_tsflib_benchmark.sh 0 Autoformer YOUR_HF_TOKEN
 ```
 
 Requires a HuggingFace token with access to LLaMA 3.
