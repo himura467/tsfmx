@@ -39,8 +39,8 @@ def _load_mm_tsflib(path: Path) -> dict[str, dict[str, float]]:
         if not line:
             continue
         if "mse:" in line and setting:
-            parsed = {k: float(v) for k, v in re.findall(r"(\w+):([\d.eE+\-]+)", line)}
-            if "mse" in parsed:
+            parsed = {k: float(v) for k, v in re.findall(r"(\w+):\s*([\d.eE+\-]+)", line)}
+            if "mse" in parsed and "mae" in parsed:
                 m = re.match(r"^(.+?)_\d+_\d+_LLAMA3", setting)
                 if m:
                     domain = _MM_DOMAIN_ALIASES.get(m.group(1), m.group(1))
