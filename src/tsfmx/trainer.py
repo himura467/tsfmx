@@ -50,6 +50,7 @@ class MultimodalTrainer:
         mode: TrainingMode,
         device: torch.device,
         wandb_run: wandb.Run | None,
+        loss_fn: nn.Module = nn.MSELoss(),
         fusion_optimizers: tuple[Optimizer | None, LRScheduler | None] = (None, None),
         adapter_optimizers: tuple[Optimizer | None, LRScheduler | None] = (None, None),
     ) -> None:
@@ -63,6 +64,7 @@ class MultimodalTrainer:
             mode: Training mode.
             device: Device to train on.
             wandb_run: W&B run instance for logging. If None, W&B logging is disabled.
+            loss_fn: Loss function for training and validation.
             fusion_optimizers: (optimizer, lr_scheduler) for the fusion module. Defaults created from args if None.
             adapter_optimizers: (optimizer, lr_scheduler) for the adapter. Defaults created from args if None.
         """
@@ -105,7 +107,7 @@ class MultimodalTrainer:
             ),
         )
 
-        self.loss_fn = nn.MSELoss()
+        self.loss_fn = loss_fn
 
         num_training_steps = args.num_train_epochs * math.ceil(
             len(self.train_loader) / args.gradient_accumulation_steps
