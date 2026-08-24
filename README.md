@@ -134,6 +134,31 @@ PYTHONPATH=. uv run python scripts/visualize_time_mmd_predictions.py \
 
 Use `--max-samples N` to limit the number of plots per split, and `--splits train val test` to select which splits to visualize.
 
+### 6. Text Ablation Analysis
+
+Beating a unimodal baseline does not prove that a model reads its text: the fusion branch can also act as a plain regularizer, or latch onto a domain identity signal that happens to be encoded in the text embeddings. This script evaluates one checkpoint repeatedly, perturbing only the text side each time, and reports the degradation relative to the unperturbed run.
+
+```sh
+PYTHONPATH=. uv run python scripts/eval_time_mmd_text_ablation.py \
+    --model-config examples/time_mmd/configs/models/timesfm.yml \
+    --checkpoint-path outputs/sweeps/fusion/best_checkpoints/best_val_loss.pt \
+    --output outputs/text_ablation_results.json
+```
+
+| Ablation | What it does | What a drop in accuracy means |
+| --- | --- | --- |
+| `none` | Passes text through unchanged. | Reference row that the deltas are measured against. |
+| `drop` | Removes text entirely, so the decoder skips fusion. | The fusion branch contributes something, but not necessarily by reading the text. |
+| `shuffle` | Gives each sample another sample's text, via a derangement over the split. | The model uses the *content* of the text, not merely its presence. |
+| `permute_patches` | Shuffles patch order within each sample's own text. | The model uses the temporal alignment between text and patches. |
+| `noise` | Adds Gaussian noise scaled by the split's embedding std. | Graded robustness curve; scale it with `--noise-scale`. |
+
+The telling comparison is `drop` against `shuffle`. If both degrade by a similar amount, the model is reading the text. If `drop` degrades but `shuffle` does not, the fusion branch is contributing independently of what the text actually says.
+
+Perturbations are applied per sample index rather than per batch, so results are independent of batch size and iteration order, and reproducible for a given `--seed`. Use `--ablations` to run a subset (`none` is always included as the reference), and `--domains` to select domains.
+
+Note that under the current bias-free fusion projection, `drop` and zeroing the text embeddings are equivalent.
+
 ## Benchmark Comparison with MM-TSFlib
 
 [MM-TSFlib](https://github.com/AdityaLab/MM-TSFlib) is cloned under `third_party/MM-TSFlib` (not tracked by git). MM-TSFlib is run on its own pre-processed Time-MMD CSVs; tsfmx is evaluated on the raw Time-MMD data split 70/10/20. Both cover the same underlying domains and split ratio.
