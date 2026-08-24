@@ -4,22 +4,16 @@
 import argparse
 import json
 from pathlib import Path
-from typing import Any, cast
 
-import torch
-from torch.utils.data import ConcatDataset, DataLoader
-
+from examples.time_mmd.builders import build_decoder
 from examples.time_mmd.configs.forecast import ForecastConfig
 from examples.time_mmd.configs.model import ModelConfig
 from examples.time_mmd.cross_validation import DomainSpec, load_fold_datasets
-from tsfmx.data.collate import adapter_collate_fn, multimodal_collate_fn
-from tsfmx.decoder import MultimodalDecoder, MultimodalDecoderConfig
+from tsfmx.data.collate import collate_fn_for_mode
+from tsfmx.data.loader import build_dataloader
 from tsfmx.evaluator import MultimodalEvaluator
-from tsfmx.tsfm.base import TsfmAdapter
-from tsfmx.tsfm.chronos import Chronos2Adapter
-from tsfmx.tsfm.timesfm import TimesFM2p5Adapter
-from tsfmx.types import Batch, TrainingMode
-from tsfmx.utils.device import pin_memory, resolve_device
+from tsfmx.types import TrainingMode
+from tsfmx.utils.device import resolve_device
 from tsfmx.utils.logging import setup_logger
 
 _logger = setup_logger()
@@ -41,50 +35,18 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _make_loader(
-    dataset: ConcatDataset[Any], batch_size: int, collate_fn: Any, device: torch.device
-) -> DataLoader[Batch]:
-    return cast(
-        DataLoader[Batch],
-        DataLoader(
-            dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=0,
-            collate_fn=collate_fn,
-            pin_memory=pin_memory(device),
-        ),
-    )
-
-
 def main() -> int:
     args = _parse_args()
     model_config = ModelConfig.from_yaml(Path(args.model_config)) if args.model_config else ModelConfig()
     forecast_config = ForecastConfig.from_yaml(Path(args.forecast_config)) if args.forecast_config else ForecastConfig()
 
     device = resolve_device()
-    adapter: TsfmAdapter
-    match model_config.adapter.type:
-        case "chronos":
-            adapter = Chronos2Adapter.from_pretrained(device, repo_id=model_config.adapter.pretrained_repo)
-        case "timesfm":
-            adapter = TimesFM2p5Adapter.from_pretrained(device, repo_id=model_config.adapter.pretrained_repo)
-        case _ as t:
-            raise NotImplementedError(f"Unsupported adapter type: {t!r}")
-
-    model = MultimodalDecoder(
-        adapter,
-        MultimodalDecoderConfig(
-            text_embedding_dims=model_config.fusion.text_embedding_dims,
-            num_fusion_layers=model_config.fusion.num_fusion_layers,
-            fusion_hidden_dims=model_config.fusion.fusion_hidden_dims,
-        ),
-    ).to(device)
+    model = build_decoder(model_config, device)
 
     mode: TrainingMode = model.load_checkpoint(Path(args.checkpoint_path))
     model.eval()
 
-    collate_fn = multimodal_collate_fn if mode in ("fusion", "finetune") else adapter_collate_fn
+    collate_fn = collate_fn_for_mode(mode)
     evaluator = MultimodalEvaluator(model, device)
     results: dict[str, dict[str, float]] = {}
 
@@ -105,7 +67,7 @@ def main() -> int:
             _logger.warning("Skipping %s: %s", domain, e)
             continue
 
-        metrics = evaluator.evaluate(_make_loader(test_dataset, args.batch_size, collate_fn, device))
+        metrics = evaluator.evaluate(build_dataloader(test_dataset, args.batch_size, collate_fn, device))
         results[domain] = {"mse": metrics["mse"], "mae": metrics["mae"]}
         _logger.info("%s — MSE: %.6f  MAE: %.6f", domain, metrics["mse"], metrics["mae"])
 

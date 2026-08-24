@@ -10,21 +10,20 @@ import torch
 from torch import nn
 from torch.optim import AdamW, Optimizer
 from torch.optim.lr_scheduler import LRScheduler
-from torch.utils.data import ConcatDataset, DataLoader
+from torch.utils.data import ConcatDataset
 
-from tsfmx.data.collate import adapter_collate_fn, multimodal_collate_fn
+from tsfmx.data.collate import collate_fn_for_mode
+from tsfmx.data.loader import build_dataloader
 from tsfmx.decoder import MultimodalDecoder
 from tsfmx.optimization import get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
 from tsfmx.training_args import TrainingArguments
 from tsfmx.types import (
     AdapterCheckpoint,
-    Batch,
     FinetuneCheckpoint,
     FusionCheckpoint,
     PreprocessedSample,
     TrainingMode,
 )
-from tsfmx.utils.device import pin_memory
 from tsfmx.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -83,28 +82,19 @@ class MultimodalTrainer:
         else:
             self.model.adapter.unfreeze_parameters()
 
-        collate_fn = multimodal_collate_fn if mode in ("fusion", "finetune") else adapter_collate_fn
-        self.train_loader = cast(
-            DataLoader[Batch],
-            DataLoader(
-                train_dataset,
-                batch_size=args.per_device_train_batch_size,
-                shuffle=True,
-                num_workers=0,
-                collate_fn=collate_fn,
-                pin_memory=pin_memory(self.device),
-            ),
+        collate_fn = collate_fn_for_mode(mode)
+        self.train_loader = build_dataloader(
+            train_dataset,
+            batch_size=args.per_device_train_batch_size,
+            collate_fn=collate_fn,
+            device=self.device,
+            shuffle=True,
         )
-        self.val_loader = cast(
-            DataLoader[Batch],
-            DataLoader(
-                val_dataset,
-                batch_size=args.per_device_eval_batch_size,
-                shuffle=False,
-                num_workers=0,
-                collate_fn=collate_fn,
-                pin_memory=pin_memory(self.device),
-            ),
+        self.val_loader = build_dataloader(
+            val_dataset,
+            batch_size=args.per_device_eval_batch_size,
+            collate_fn=collate_fn,
+            device=self.device,
         )
 
         self.loss_fn = loss_fn

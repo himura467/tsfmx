@@ -1,9 +1,11 @@
 """Collate functions for DataLoader batching."""
 
+from typing import Callable
+
 import numpy as np
 import torch
 
-from tsfmx.types import Batch, PreprocessedSample
+from tsfmx.types import Batch, PreprocessedSample, TrainingMode
 
 
 def _build_batch(batch: list[PreprocessedSample]) -> Batch:
@@ -27,3 +29,15 @@ def multimodal_collate_fn(batch: list[PreprocessedSample]) -> Batch:
 def adapter_collate_fn(batch: list[PreprocessedSample]) -> Batch:
     """Collate function for adapter batches (no text embeddings)."""
     return _build_batch(batch)
+
+
+def collate_fn_for_mode(mode: TrainingMode) -> Callable[[list[PreprocessedSample]], Batch]:
+    """Return the collate function matching a training mode.
+
+    Args:
+        mode: Training mode. 'fusion' and 'finetune' consume text embeddings; 'adapter' does not.
+
+    Returns:
+        `multimodal_collate_fn` for text-consuming modes, `adapter_collate_fn` otherwise.
+    """
+    return multimodal_collate_fn if mode in ("fusion", "finetune") else adapter_collate_fn
