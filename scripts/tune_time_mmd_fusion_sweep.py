@@ -9,21 +9,18 @@ from typing import Any, cast
 
 import torch
 import wandb
-from torch.utils.data import DataLoader
 
+from examples.time_mmd.builders import build_decoder
 from examples.time_mmd.configs.forecast import ForecastConfig
 from examples.time_mmd.configs.model import ModelConfig
 from examples.time_mmd.cross_validation import DomainSpec, load_fold_datasets
 from tsfmx.data.collate import multimodal_collate_fn
-from tsfmx.decoder import MultimodalDecoder, MultimodalDecoderConfig
+from tsfmx.data.loader import build_dataloader
 from tsfmx.evaluator import MultimodalEvaluator
 from tsfmx.trainer import MultimodalTrainer
 from tsfmx.training_args import TrainingArguments
-from tsfmx.tsfm.base import TsfmAdapter
-from tsfmx.tsfm.chronos import Chronos2Adapter
-from tsfmx.tsfm.timesfm import TimesFM2p5Adapter
-from tsfmx.types import Batch, FusionCheckpoint
-from tsfmx.utils.device import pin_memory, resolve_device
+from tsfmx.types import FusionCheckpoint
+from tsfmx.utils.device import resolve_device
 from tsfmx.utils.logging import setup_logger
 from tsfmx.utils.seed import set_seed
 from tsfmx.utils.yaml import load_yaml
@@ -117,55 +114,6 @@ def _parse_fusion_hparams(config: Any) -> tuple[int, list[int]]:
     return num_fusion_layers, fusion_hidden_dims
 
 
-def _create_fusion_model(
-    model_config: ModelConfig,
-    num_fusion_layers: int,
-    fusion_hidden_dims: list[int],
-    device: torch.device,
-) -> MultimodalDecoder:
-    """Build a MultimodalDecoder with a pretrained adapter and fusion head.
-
-    Args:
-        model_config: Static model configuration (adapter repo, embedding dims).
-        num_fusion_layers: Number of linear layers in the fusion MLP.
-        fusion_hidden_dims: Hidden layer widths of the fusion MLP.
-        device: Device to load the model onto.
-
-    Returns:
-        MultimodalDecoder with a frozen adapter and initialized fusion head.
-    """
-    _logger.info(
-        "Loading pretrained adapter from %s on %s",
-        model_config.adapter.pretrained_repo,
-        device,
-    )
-    adapter: TsfmAdapter
-    match model_config.adapter.type:
-        case "chronos":
-            adapter = Chronos2Adapter.from_pretrained(device, repo_id=model_config.adapter.pretrained_repo)
-        case "timesfm":
-            adapter = TimesFM2p5Adapter.from_pretrained(device, repo_id=model_config.adapter.pretrained_repo)
-        case _:
-            raise NotImplementedError(f"Unsupported adapter type: {model_config.adapter.type!r}")
-    if adapter.patch_len != model_config.adapter.patch_len:
-        raise ValueError(
-            f"adapter.patch_len ({adapter.patch_len}) does not match "
-            f"model_config.adapter.patch_len ({model_config.adapter.patch_len}); "
-            "the cached dataset was built with the config value — rebuild the cache or fix the config."
-        )
-    config = MultimodalDecoderConfig(
-        text_embedding_dims=model_config.fusion.text_embedding_dims,
-        num_fusion_layers=num_fusion_layers,
-        fusion_hidden_dims=fusion_hidden_dims,
-    )
-    _logger.info(
-        "Creating MultimodalDecoder: num_fusion_layers=%d, fusion_hidden_dims=%s",
-        num_fusion_layers,
-        fusion_hidden_dims,
-    )
-    return MultimodalDecoder(adapter, config).to(device)
-
-
 def _train_and_evaluate(
     run: wandb.Run,
     base_training_args: TrainingArguments,
@@ -240,12 +188,7 @@ def _train_and_evaluate(
         mode="fusion",
     )
 
-    model = _create_fusion_model(
-        model_config,
-        num_fusion_layers,
-        fusion_hidden_dims,
-        device,
-    )
+    model = build_decoder(model_config, device, num_fusion_layers, fusion_hidden_dims)
 
     trainer = MultimodalTrainer(
         model=model,
@@ -265,16 +208,11 @@ def _train_and_evaluate(
     best_val_loss = checkpoint["best_val_loss"]
     model.fusion.load_state_dict(checkpoint["fusion_state_dict"])
 
-    test_dataloader = cast(
-        DataLoader[Batch],
-        DataLoader(
-            test_dataset,
-            batch_size=training_args.per_device_eval_batch_size,
-            shuffle=False,
-            num_workers=0,
-            collate_fn=multimodal_collate_fn,
-            pin_memory=pin_memory(device),
-        ),
+    test_dataloader = build_dataloader(
+        test_dataset,
+        batch_size=training_args.per_device_eval_batch_size,
+        collate_fn=multimodal_collate_fn,
+        device=device,
     )
 
     _logger.info("Evaluating on test domains: %s", test_domain_specs)
