@@ -11,7 +11,7 @@ from torch.utils.data import ConcatDataset
 from examples.time_mmd.builders import build_decoder
 from examples.time_mmd.configs.forecast import ForecastConfig
 from examples.time_mmd.configs.model import ModelConfig
-from examples.time_mmd.cross_validation import DomainSpec, load_fold_datasets
+from examples.time_mmd.cross_validation import DomainSpec, load_split_dataset
 from tsfmx.ablation import TEXT_ABLATIONS, TextAblatedDataset, TextAblation
 from tsfmx.data.collate import adapter_collate_fn, collate_fn_for_mode
 from tsfmx.data.loader import build_dataloader
@@ -39,6 +39,11 @@ def _parse_args() -> argparse.Namespace:
         choices=list(TEXT_ABLATIONS),
         default=list(TEXT_ABLATIONS),
         help="Which ablations to run. 'none' is always included as the reference.",
+    )
+    parser.add_argument(
+        "--augment",
+        action="store_true",
+        help="Load the test split from the augmented cache, which yields up to patch_len times more samples.",
     )
     parser.add_argument("--cache-dir", type=str, default="data/cache")
     parser.add_argument("--output", type=str, default="outputs/text_ablation_results.json")
@@ -197,13 +202,12 @@ def main() -> int:
 
     evaluator = MultimodalEvaluator(model, device)
     results: dict[str, dict[str, dict[str, float]]] = {}
+    num_samples: dict[str, int] = {}
 
     for domain in args.domains:
         try:
-            _, _, test_dataset = load_fold_datasets(
-                train_domain_specs=[DomainSpec(name=f"{domain}_train")],
-                val_domain_specs=[DomainSpec(name=f"{domain}_val")],
-                test_domain_specs=[DomainSpec(name=f"{domain}_test")],
+            test_dataset = load_split_dataset(
+                domain_specs=[DomainSpec(name=f"{domain}_test", augment=args.augment)],
                 text_encoder_type=model_config.fusion.text_encoder_type,
                 patch_len=model_config.adapter.patch_len,
                 context_len=forecast_config.context_len,
@@ -215,6 +219,8 @@ def main() -> int:
             _logger.warning("Skipping %s: %s", domain, e)
             continue
 
+        num_samples[domain] = len(test_dataset)
+        _logger.info("%s: %d test samples", domain, num_samples[domain])
         results[domain] = _evaluate_domain(
             evaluator, test_dataset, ablations, mode, args.batch_size, args.seed, args.noise_scale, device
         )
@@ -228,7 +234,7 @@ def main() -> int:
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump({"num_samples": num_samples, "metrics": results}, f, indent=2)
     _logger.info("Results written to %s", output_path)
     return 0
 

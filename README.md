@@ -155,7 +155,9 @@ PYTHONPATH=. uv run python scripts/eval_time_mmd_text_ablation.py \
 
 The telling comparison is `drop` against `shuffle`. If both degrade by a similar amount, the model is reading the text. If `drop` degrades but `shuffle` does not, the fusion branch is contributing independently of what the text actually says.
 
-Perturbations are applied per sample index rather than per batch, so results are independent of batch size and iteration order, and reproducible for a given `--seed`. Use `--ablations` to run a subset (`none` is always included as the reference), and `--domains` to select domains.
+Perturbations are applied per sample index rather than per batch, so results are independent of batch size and iteration order, and reproducible for a given `--seed`. Use `--ablations` to run a subset (`none` is always included as the reference), `--domains` to select domains, and `--augment` to evaluate on the augmented cache from step 2.
+
+Read the deltas against the per-domain sample counts, which are logged and written to the `num_samples` field of the output JSON. With the default `context_len` and `horizon_len` of 32, a monthly domain's test split holds only a handful of samples, far too few to read a difference of a few percent; `--augment` raises that by up to `patch_len` times. Those added samples are overlapping windows rather than independent draws, so the confidence intervals narrow less than the raw count suggests.
 
 Note that under the current bias-free fusion projection, `drop` and zeroing the text embeddings are equivalent.
 
