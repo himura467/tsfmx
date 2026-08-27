@@ -17,9 +17,9 @@ if TYPE_CHECKING:
 
 _logger = get_logger()
 
-TextAblation = Literal["none", "drop", "shuffle", "permute_patches", "noise"]
+TextAblation = Literal["none", "drop", "mean", "shuffle", "permute_patches", "noise"]
 
-TEXT_ABLATIONS: tuple[TextAblation, ...] = ("none", "drop", "shuffle", "permute_patches", "noise")
+TEXT_ABLATIONS: tuple[TextAblation, ...] = ("none", "drop", "mean", "shuffle", "permute_patches", "noise")
 
 
 def _derangement(size: int, seed: int) -> npt.NDArray[np.int64]:
@@ -60,6 +60,9 @@ class TextAblatedDataset(Dataset[PreprocessedSample]):
     any change in metrics is attributable to the text alone.
 
     - drop: skips fusion entirely, so batches must be collated with `adapter_collate_fn`.
+    - mean: removes between-sample variation while keeping a plausible input. Matching `none`
+      means the fusion output carries no sample-specific information and has collapsed to a
+      learned constant, which `drop` and `shuffle` together can only suggest.
     - shuffle: isolates whether the model uses the content of the text or its mere presence.
     - permute_patches: destroys only the temporal alignment, leaving the content intact.
     - noise: grades the degradation instead of breaking the text outright.
@@ -103,6 +106,7 @@ class TextAblatedDataset(Dataset[PreprocessedSample]):
         self._validate()
 
         self._perm = _derangement(self._len, seed) if ablation == "shuffle" else None
+        self._mean_embeddings = self._compute_mean_embeddings() if ablation == "mean" else None
         self._noise_std = self._estimate_noise_std() if ablation == "noise" else 0.0
 
     def _validate(self) -> None:
@@ -124,6 +128,21 @@ class TextAblatedDataset(Dataset[PreprocessedSample]):
                     "increase context_len relative to patch_len for it to be meaningful",
                     num_patches,
                 )
+
+    def _compute_mean_embeddings(self) -> npt.NDArray[np.float32]:
+        """Average the text embeddings over every sample, keeping the patch axis.
+
+        Every sample is used rather than a subsample, so that the result is the exact
+        quantity the ablation claims to substitute.
+
+        Returns:
+            Mean embeddings of shape (num_patches, text_dims).
+        """
+        total = np.zeros_like(self.dataset[0]["text_embeddings"], dtype=np.float64)
+        for i in range(self._len):
+            total += self.dataset[i]["text_embeddings"]
+        _logger.info("Computed mean text embeddings over %d samples", self._len)
+        return (total / self._len).astype(np.float32)
 
     def _estimate_noise_std(self) -> float:
         """Estimate the embedding standard deviation, to put the injected noise on the same scale.
@@ -170,6 +189,10 @@ class TextAblatedDataset(Dataset[PreprocessedSample]):
         )
 
         if self.ablation == "drop":
+            return result
+
+        if self._mean_embeddings is not None:  # non-None exactly for the 'mean' ablation
+            result["text_embeddings"] = self._mean_embeddings
             return result
 
         if self._perm is not None:  # non-None exactly for the 'shuffle' ablation
