@@ -1,0 +1,10 @@
+adapter:
+  type: chronos
+  pretrained_repo: amazon/chronos-2
+  patch_len: 16
+fusion:
+  text_encoder_type: english
+  text_embedding_dims: 384
+  num_fusion_layers: 1
+  fusion_hidden_dims: []
+  fusion_normalize: true

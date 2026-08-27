@@ -9,6 +9,10 @@ class MultimodalFusion(nn.Module):
     """Addition-based fusion of time series and text embeddings.
 
     Projects text_embeddings to ts_embedding_dims, then adds element-wise.
+
+    Diagnostics on a trained checkpoint showed the projection output reaching roughly twice
+    the magnitude of the time series embeddings it is added to, which `normalize` exists to
+    control. It defaults to off, so the module is unchanged unless asked.
     """
 
     def __init__(
@@ -17,6 +21,7 @@ class MultimodalFusion(nn.Module):
         text_embedding_dims: int,
         num_layers: int = 1,
         hidden_dims: list[int] = [],
+        normalize: bool = False,
     ) -> None:
         super().__init__()
 
@@ -28,6 +33,15 @@ class MultimodalFusion(nn.Module):
         for i in range(len(dims) - 1):
             layers.append(nn.Linear(dims[i], dims[i + 1], bias=False))  # bias deemed unnecessary by W&B Sweeps
             layers.append(nn.ReLU())
+        if normalize:
+            # Divides out the projection's own output scale and replaces it with an explicit
+            # learned one, so the model can admit less text instead of being forced to accept
+            # whatever magnitude the projection happens to produce. RMSNorm rather than
+            # LayerNorm because centering would destroy the component shared across samples,
+            # which the ablations identified as the useful part of the offset.
+            layers.append(nn.RMSNorm(ts_embedding_dims))
+        # Normalization lives inside `projection` so that it stays the single expression of
+        # what fusion adds, and callers cannot read a partial transform.
         self.projection = nn.Sequential(*layers)
 
         for module in self.projection.modules():

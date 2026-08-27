@@ -177,6 +177,8 @@ It splits both the text embeddings and the fusion projection output into the com
 
 A low `text_variation_ratio`, or a `text_mean_pairwise_cosine` near 1, means the signal is already gone at the encoder and no fusion mechanism could recover it: `all-MiniLM-L6-v2` truncates at 256 tokens and silently drops the tail of a multi-article patch. A healthy `text_variation_ratio` with a low `projection_variation_ratio` means the additive projection is discarding it instead.
 
+A high `varying_vs_ts` is a third failure, and the one measured so far: the text reaches the backbone intact but at a magnitude rivalling the time series representation, with no way for the model to admit less of it. The `fusion_normalize` option answers that, dividing out the projection's own output scale and replacing it with an explicit learned one. [chronos_normalized.yml](examples/time_mmd/configs/models/chronos_normalized.yml) enables it; pass it to the step 3 sweep as `--model-config`, then re-run this script to see how far `varying_vs_ts` fell. It defaults to off, so checkpoints trained before it are unaffected.
+
 ## Benchmark Comparison with MM-TSFlib
 
 [MM-TSFlib](https://github.com/AdityaLab/MM-TSFlib) is cloned under `third_party/MM-TSFlib` (not tracked by git). MM-TSFlib is run on its own pre-processed Time-MMD CSVs; tsfmx is evaluated on the raw Time-MMD data split 70/10/20. Both cover the same underlying domains and split ratio.

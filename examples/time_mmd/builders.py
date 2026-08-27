@@ -79,5 +79,6 @@ def build_decoder(
         text_embedding_dims=model_config.fusion.text_embedding_dims,
         num_fusion_layers=resolved_layers,
         fusion_hidden_dims=resolved_hidden_dims,
+        fusion_normalize=model_config.fusion.fusion_normalize,
     )
     return MultimodalDecoder(build_adapter(model_config, device), config).to(device)
