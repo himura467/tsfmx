@@ -21,6 +21,7 @@ class MultimodalDecoderConfig:
     text_embedding_dims: int = 384
     num_fusion_layers: int = 1
     fusion_hidden_dims: list[int] = field(default_factory=list)
+    fusion_normalize: bool = False
 
 
 class MultimodalDecoder(nn.Module):
@@ -38,6 +39,7 @@ class MultimodalDecoder(nn.Module):
             text_embedding_dims=config.text_embedding_dims,
             num_layers=config.num_fusion_layers,
             hidden_dims=config.fusion_hidden_dims,
+            normalize=config.fusion_normalize,
         )
 
     def load_checkpoint(self, path: Path) -> TrainingMode:

@@ -26,6 +26,7 @@ class FusionConfig:
     text_embedding_dims: int = 384
     num_fusion_layers: int = 1
     fusion_hidden_dims: list[int] = field(default_factory=list)
+    fusion_normalize: bool = False
 
 
 @dataclass
