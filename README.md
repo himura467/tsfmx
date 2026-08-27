@@ -149,17 +149,33 @@ PYTHONPATH=. uv run python scripts/eval_time_mmd_text_ablation.py \
 | --- | --- | --- |
 | `none` | Passes text through unchanged. | Reference row that the deltas are measured against. |
 | `drop` | Removes text entirely, so the decoder skips fusion. | The fusion branch contributes something, but not necessarily by reading the text. |
+| `mean` | Replaces every sample's text with the dataset mean. | Between-sample variation is used. *Matching* `none` instead means the fusion output has collapsed to a learned constant. |
 | `shuffle` | Gives each sample another sample's text, via a derangement over the split. | The model uses the *content* of the text, not merely its presence. |
 | `permute_patches` | Shuffles patch order within each sample's own text. | The model uses the temporal alignment between text and patches. |
 | `noise` | Adds Gaussian noise scaled by the split's embedding std. | Graded robustness curve; scale it with `--noise-scale`. |
 
-The telling comparison is `drop` against `shuffle`. If both degrade by a similar amount, the model is reading the text. If `drop` degrades but `shuffle` does not, the fusion branch is contributing independently of what the text actually says.
+The telling comparison is `drop` against `shuffle`. If both degrade by a similar amount, the model is reading the text. If `drop` degrades but `shuffle` does not, the fusion branch is contributing independently of what the text actually says, and `mean` distinguishes the two readings.
 
 Perturbations are applied per sample index rather than per batch, so results are independent of batch size and iteration order, and reproducible for a given `--seed`. Use `--ablations` to run a subset (`none` is always included as the reference), `--domains` to select domains, and `--augment` to evaluate on the augmented cache from step 2.
 
 Read the deltas against the per-domain sample counts, which are logged and written to the `num_samples` field of the output JSON. With the default `context_len` and `horizon_len` of 32, a monthly domain's test split holds only a handful of samples, far too few to read a difference of a few percent; `--augment` raises that by up to `patch_len` times. Those added samples are overlapping windows rather than independent draws, so the confidence intervals narrow less than the raw count suggests.
 
 Note that under the current bias-free fusion projection, `drop` and zeroing the text embeddings are equivalent.
+
+### 7. Text Fusion Diagnostics
+
+The ablations above say whether sample-specific text information reaches the forecast. When it does not, this script says where it was lost, which decides whether to fix the text pipeline or the fusion mechanism.
+
+```sh
+PYTHONPATH=. uv run python scripts/diagnose_time_mmd_text_fusion.py \
+    --model-config examples/time_mmd/configs/models/chronos.yml \
+    --checkpoint-path outputs/sweeps/fusion/best_checkpoints/best_val_loss.pt \
+    --augment
+```
+
+It splits both the text embeddings and the fusion projection output into the component shared by every sample and the component that varies between samples, reported as `text_variation_ratio` and `projection_variation_ratio`. `constant_vs_ts` and `varying_vs_ts` put those two components on the scale of the time series embeddings they are added to.
+
+A low `text_variation_ratio`, or a `text_mean_pairwise_cosine` near 1, means the signal is already gone at the encoder and no fusion mechanism could recover it: `all-MiniLM-L6-v2` truncates at 256 tokens and silently drops the tail of a multi-article patch. A healthy `text_variation_ratio` with a low `projection_variation_ratio` means the additive projection is discarding it instead.
 
 ## Benchmark Comparison with MM-TSFlib
 
