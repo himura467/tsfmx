@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 from examples.time_mmd.builders import build_decoder
 from examples.time_mmd.configs.forecast import ForecastConfig
 from examples.time_mmd.configs.model import ModelConfig
-from examples.time_mmd.cross_validation import DomainSpec, load_split_dataset
+from tsfmx.data.splits import DomainSpec, load_split_dataset
 from tsfmx.data.collate import multimodal_collate_fn
 from tsfmx.data.loader import build_dataloader
 from tsfmx.decoder import MultimodalDecoder
@@ -47,6 +47,13 @@ def _parse_args() -> argparse.Namespace:
         help="Per-domain cap on samples used for the cosine similarities, which are quadratic in this count.",
     )
     parser.add_argument("--seed", type=int, default=42)
+
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="time_mmd",
+        help="Name the cache was built under: 'time_mmd', or 'fidel_ts' for a Fidel-TS sub-dataset.",
+    )
 
     return parser.parse_args()
 
@@ -313,6 +320,7 @@ def main() -> int:
     for domain in args.domains:
         try:
             test_dataset = load_split_dataset(
+                dataset_name=args.dataset,
                 domain_specs=[DomainSpec(name=f"{domain}_test", augment=args.augment)],
                 text_encoder_type=model_config.fusion.text_encoder_type,
                 patch_len=model_config.adapter.patch_len,

@@ -218,5 +218,8 @@ data/Time-MMD/
 # Fidel-TS datasets (downloaded via scripts/download_fidel_ts.sh)
 data/Fidel-TS/
 
+# Pre-computed text embeddings (built via the cache_*_datasets.py scripts)
+data/cache/
+
 # External repos
 third_party/

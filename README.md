@@ -214,6 +214,39 @@ Static text (`general_info`, `channel_info`) is deliberately left out. It is con
 
 On `Bear_room` room 104 at the default context and horizon of 32, this yields 1859 samples with no empty text patch, 783 distinct weather sentences and 106 distinct control sentences over 3718 patch slots, and no single control sentence covering more than 16% of them. Time-MMD's text, by contrast, reports a `text_mean_pairwise_cosine` of 0.73-0.90.
 
+### Pre-compute text embeddings
+
+Splitting happens inside the loader: each series is cut into contiguous train, val and test parts *before* any window is formed, so no window straddles a boundary and no training window can see a value a later split is evaluated on. Each entity and split pair is cached separately, under the entity name `<entity>_<split>`.
+
+```sh
+PYTHONPATH=. uv run python scripts/cache_fidel_ts_datasets.py \
+    --model-config examples/time_mmd/configs/models/chronos.yml \
+    --dataset-config examples/fidel_ts/configs/datasets/bear_room.yml \
+    --text-encoder-type english
+```
+
+`--entities` restricts the run to a subset (it defaults to every series with a time series file, which for `Bear_room` is 80 rooms), `--splits` to a subset of splits, and `--train-ratio` / `--val-ratio` change the 70/10/20 default. Pass `--augment` for the augmented cache, as in step 2 of the Time-MMD quick start.
+
+### Running the Time-MMD scripts on Fidel-TS
+
+Every script that reads a cached split takes `--dataset`, naming the cache to read, so steps 3 to 7 of the quick start work unchanged against either benchmark. The sweeps take `--entities`, whose values they suffix with `_train`, `_val` and `_test`:
+
+```sh
+PYTHONPATH=. uv run python scripts/tune_time_mmd_fusion_sweep.py \
+    --model-config examples/time_mmd/configs/models/chronos.yml \
+    --sweep-config examples/time_mmd/configs/sweeps/fusion_3layers.yml \
+    --dataset fidel_ts --entities 104 105 107 108 110
+```
+
+```sh
+PYTHONPATH=. uv run python scripts/eval_time_mmd_text_ablation.py \
+    --model-config examples/time_mmd/configs/models/chronos.yml \
+    --checkpoint-path outputs/sweeps/fusion/best_checkpoints/best_val_loss.pt \
+    --dataset fidel_ts --domains 104 105 107 108 110
+```
+
+The scripts keep their `time_mmd` names, which no longer describe everything they read; `--dataset` defaults to `time_mmd`, so existing invocations are unaffected.
+
 ## Benchmark Comparison with MM-TSFlib
 
 [MM-TSFlib](https://github.com/AdityaLab/MM-TSFlib) is cloned under `third_party/MM-TSFlib` (not tracked by git). MM-TSFlib is run on its own pre-processed Time-MMD CSVs; tsfmx is evaluated on the raw Time-MMD data split 70/10/20. Both cover the same underlying domains and split ratio.

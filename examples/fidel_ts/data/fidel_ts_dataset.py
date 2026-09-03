@@ -6,7 +6,7 @@ import json
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -21,6 +21,10 @@ _logger = get_logger()
 
 #: Format of the timestamp keys in every Fidel-TS heterogeneous report.
 _REPORT_KEY_FORMAT = "%Y%m%d%H%M"
+
+Split = Literal["train", "val", "test", "all"]
+
+SPLITS: tuple[Split, ...] = ("train", "val", "test", "all")
 
 
 @dataclass(frozen=True)
@@ -66,11 +70,16 @@ class FidelTsDataset(MultimodalDatasetBase):
         horizon_len: Length of horizon. Must be an integer multiple of patch_len.
         timestamp_column: Column holding the timestamps.
         augment: If True, generate one sample set per shift in range(patch_len).
+        split: Which contiguous part of the series to use. The series is cut before any window
+            is formed, so no window straddles a split boundary.
+        train_ratio: Fraction of the series given to 'train'.
+        val_ratio: Fraction given to 'val'; 'test' takes the remainder.
 
     Raises:
         FileNotFoundError: If data_dir or the entity's time series file does not exist.
-        ValueError: If context_len or horizon_len is not a multiple of patch_len, or if
-            target_column or timestamp_column is missing from the time series file.
+        ValueError: If context_len or horizon_len is not a multiple of patch_len, if split is
+            unknown, if the split ratios do not leave a test split, or if target_column or
+            timestamp_column is missing from the time series file.
     """
 
     def __init__(
@@ -84,6 +93,9 @@ class FidelTsDataset(MultimodalDatasetBase):
         horizon_len: int = 32,
         timestamp_column: str = "Timestamp",
         augment: bool = False,
+        split: Split = "all",
+        train_ratio: float = 0.7,
+        val_ratio: float = 0.1,
     ) -> None:
         self.data_dir = Path(data_dir)
         self.entity = entity
@@ -94,6 +106,9 @@ class FidelTsDataset(MultimodalDatasetBase):
         self.horizon_len = horizon_len
         self.timestamp_column = timestamp_column
         self.augment = augment
+        self.split = split
+        self.train_ratio = train_ratio
+        self.val_ratio = val_ratio
         self.data: list[RawSample] = []
 
         self._validate()
@@ -106,6 +121,34 @@ class FidelTsDataset(MultimodalDatasetBase):
             raise ValueError(f"context_len ({self.context_len}) must be a multiple of patch_len ({self.patch_len})")
         if self.horizon_len % self.patch_len != 0:
             raise ValueError(f"horizon_len ({self.horizon_len}) must be a multiple of patch_len ({self.patch_len})")
+        if self.split not in SPLITS:
+            raise ValueError(f"Unknown split: {self.split!r}. Expected one of {list(SPLITS)}")
+        if not 0.0 < self.train_ratio + self.val_ratio < 1.0:
+            raise ValueError(f"train_ratio + val_ratio must lie in (0, 1), got {self.train_ratio} + {self.val_ratio}")
+
+    def _split_bounds(self, length: int) -> tuple[int, int]:
+        """Return the half-open index range of the configured split.
+
+        The series is cut before any window is formed, so no window straddles a boundary and no
+        training window can see a value a later split is evaluated on.
+
+        Args:
+            length: Number of points in the series.
+
+        Returns:
+            Tuple of (start, end) indices into the series.
+        """
+        train_end = int(length * self.train_ratio)
+        val_end = train_end + int(length * self.val_ratio)
+        match self.split:
+            case "train":
+                return 0, train_end
+            case "val":
+                return train_end, val_end
+            case "test":
+                return val_end, length
+            case _:
+                return 0, length
 
     @property
     def _time_series_path(self) -> Path:
@@ -242,11 +285,20 @@ class FidelTsDataset(MultimodalDatasetBase):
             pd.to_datetime(frame[self.timestamp_column]).to_numpy(), dtype="datetime64[ns]"
         ).astype(np.int64)
         values = frame[self.target_column].to_numpy(dtype=np.float64)
+
+        split_start, split_end = self._split_bounds(len(values))
+        times, values = times[split_start:split_end], values[split_start:split_end]
         sources = [(source, *self._load_text_source(source)) for source in self.text_sources]
 
         window = self.context_len + self.horizon_len
         if len(values) < window:
-            _logger.warning("Entity %s has %d points, fewer than the %d-step window", self.entity, len(values), window)
+            _logger.warning(
+                "Entity %s split %s has %d points, fewer than the %d-step window",
+                self.entity,
+                self.split,
+                len(values),
+                window,
+            )
             return
 
         shifts = range(self.patch_len) if self.augment else range(1)
@@ -264,6 +316,7 @@ class FidelTsDataset(MultimodalDatasetBase):
                         patched_texts=self._patched_texts(times[patch_end_indices], sources),
                         metadata={
                             "entity": self.entity,
+                            "split": self.split,
                             "column": self.target_column,
                             "shift": shift,
                             "start_index": start,
@@ -273,7 +326,7 @@ class FidelTsDataset(MultimodalDatasetBase):
                         },
                     )
                 )
-        _logger.info("Built %d samples for entity %s", len(self.data), self.entity)
+        _logger.info("Built %d samples for entity %s split %s", len(self.data), self.entity, self.split)
 
     @override
     def __getitem__(self, index: int) -> RawSample:
@@ -287,6 +340,7 @@ class FidelTsDataset(MultimodalDatasetBase):
         """Return a summary of what was loaded, for logging and cache provenance."""
         return {
             "entity": self.entity,
+            "split": self.split,
             "target_column": self.target_column,
             "num_samples": len(self.data),
             "text_sources": [source.name for source in self.text_sources],

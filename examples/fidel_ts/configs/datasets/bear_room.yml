@@ -1,0 +1,13 @@
+name: Bear_room
+target_column: Zone Temperature
+timestamp_column: Timestamp
+
+# Weather is issued every 6 hours and carries the forward-looking part ("expected to remain
+# overcast"); control is issued every 5 minutes and states the setpoints in force. Both are keyed
+# by the time they were issued, so both are retrievable as of the prediction time.
+text_sources:
+  - name: Weather
+    path: hetero/weather/weather_report/formal_report/wm_messages_v1.json
+  - name: Control
+    path: hetero/room/room_report.zip/room_report/formal_report/{entity}/all.json
+    per_entity: true

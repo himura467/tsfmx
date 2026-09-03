@@ -7,7 +7,7 @@ from pathlib import Path
 from examples.time_mmd.builders import build_decoder
 from examples.time_mmd.configs.forecast import ForecastConfig
 from examples.time_mmd.configs.model import ModelConfig
-from examples.time_mmd.cross_validation import DomainSpec, load_fold_datasets
+from tsfmx.data.splits import DomainSpec, load_fold_datasets
 from tsfmx.data.collate import collate_fn_for_mode
 from tsfmx.data.loader import build_dataloader
 from tsfmx.types import TrainingMode
@@ -66,6 +66,13 @@ def _parse_args() -> argparse.Namespace:
         help="Directory where plot PNG files are saved.",
     )
 
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="time_mmd",
+        help="Name the cache was built under: 'time_mmd', or 'fidel_ts' for a Fidel-TS sub-dataset.",
+    )
+
     return parser.parse_args()
 
 
@@ -98,6 +105,7 @@ def main() -> int:
 
     _logger.info("Loading datasets for domains: %s", domains)
     train_dataset, val_dataset, test_dataset = load_fold_datasets(
+        dataset_name=args.dataset,
         train_domain_specs=train_domain_specs,
         val_domain_specs=val_domain_specs,
         test_domain_specs=test_domain_specs,
