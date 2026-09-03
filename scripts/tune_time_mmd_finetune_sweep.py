@@ -13,7 +13,7 @@ import wandb
 from examples.time_mmd.builders import build_decoder
 from examples.time_mmd.configs.forecast import ForecastConfig
 from examples.time_mmd.configs.model import ModelConfig
-from examples.time_mmd.cross_validation import DomainSpec, load_fold_datasets
+from tsfmx.data.splits import DomainSpec, load_fold_datasets
 from tsfmx.data.collate import multimodal_collate_fn
 from tsfmx.data.loader import build_dataloader
 from tsfmx.decoder import MultimodalDecoder
@@ -27,6 +27,9 @@ from tsfmx.utils.seed import set_seed
 from tsfmx.utils.yaml import load_yaml
 
 _logger = setup_logger()
+
+# Selected for high-quality textual data (low NA rates) and sufficient numerical data points.
+_DEFAULT_ENTITIES = ["Agriculture", "Economy", "Environment", "Health_US", "Traffic"]
 
 
 def _parse_args() -> argparse.Namespace:
@@ -85,6 +88,20 @@ def _parse_args() -> argparse.Namespace:
         help="Retain the cross-trial checkpoint with the lowest test MAE as best_test_mae.pt.",
     )
     parser.add_argument("--seed", type=int, help="Random seed for reproducibility.")
+
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="time_mmd",
+        help="Name the cache was built under: 'time_mmd', or 'fidel_ts' for a Fidel-TS sub-dataset.",
+    )
+    parser.add_argument(
+        "--entities",
+        type=str,
+        nargs="+",
+        default=_DEFAULT_ENTITIES,
+        help="Entities to train on. Each is suffixed with _train, _val and _test to name its cached splits.",
+    )
 
     return parser.parse_args()
 
@@ -165,6 +182,7 @@ def _train_and_evaluate(
     test_domain_specs: list[DomainSpec],
     device: torch.device,
     cache_dir: Path,
+    dataset_name: str,
     fusion_checkpoint_path: Path,
     best_state: dict[str, float],
     best_checkpoint_dir: Path,
@@ -190,6 +208,7 @@ def _train_and_evaluate(
         test_domain_specs: Domain specs used for test evaluation.
         device: Device to train and evaluate on.
         cache_dir: Directory containing pre-computed cached datasets.
+        dataset_name: Name the cache was built under.
         fusion_checkpoint_path: Path to a FusionCheckpoint whose fusion_state_dict
             initializes the fusion head before joint fine-tuning.
         best_state: Mutable dict tracking the best val_loss, test_mse, and test_mae seen so far.
@@ -225,6 +244,7 @@ def _train_and_evaluate(
         test_domain_specs,
     )
     train_dataset, val_dataset, test_dataset = load_fold_datasets(
+        dataset_name=dataset_name,
         train_domain_specs=train_domain_specs,
         val_domain_specs=val_domain_specs,
         test_domain_specs=test_domain_specs,
@@ -352,20 +372,10 @@ def main() -> int:
         _logger.info("Setting random seed to %d", args.seed)
         set_seed(args.seed)
 
-    # Selected for high-quality textual data (low NA rates) and sufficient numerical data points.
     augment_splits = set(args.augment)
-    _train_domain_names = [
-        "Agriculture_train",
-        "Economy_train",
-        "Environment_train",
-        "Health_US_train",
-        "Traffic_train",
-    ]
-    train_domain_specs = [DomainSpec(name=d, augment="train" in augment_splits) for d in _train_domain_names]
-    _val_domain_names = ["Agriculture_val", "Economy_val", "Environment_val", "Health_US_val", "Traffic_val"]
-    val_domain_specs = [DomainSpec(name=d, augment="val" in augment_splits) for d in _val_domain_names]
-    _test_domain_names = ["Agriculture_test", "Economy_test", "Environment_test", "Health_US_test", "Traffic_test"]
-    test_domain_specs = [DomainSpec(name=d, augment="test" in augment_splits) for d in _test_domain_names]
+    train_domain_specs = [DomainSpec(name=f"{e}_train", augment="train" in augment_splits) for e in args.entities]
+    val_domain_specs = [DomainSpec(name=f"{e}_val", augment="val" in augment_splits) for e in args.entities]
+    test_domain_specs = [DomainSpec(name=f"{e}_test", augment="test" in augment_splits) for e in args.entities]
 
     device = resolve_device()
     _logger.info("Using device: %s", device)
@@ -390,6 +400,7 @@ def main() -> int:
                 test_domain_specs=test_domain_specs,
                 device=device,
                 cache_dir=Path(args.cache_dir),
+                dataset_name=args.dataset,
                 fusion_checkpoint_path=fusion_checkpoint_path,
                 best_state=best_state,
                 best_checkpoint_dir=best_checkpoint_dir,
