@@ -239,6 +239,12 @@ class MultimodalTrainer:
             horizon_len = horizon.shape[-1]
             input_padding = torch.zeros_like(context, dtype=torch.bool)
             text_embeddings = batch["text_embeddings"].to(self.device) if "text_embeddings" in batch else None
+            if text_embeddings is not None and self.args.text_dropout_prob > 0.0:
+                # Zeroing is exact modality dropout: the projection carries no bias, so a zero input
+                # contributes nothing, as skipping fusion would. It also keeps one shape per batch,
+                # which dropping the key from some samples would not.
+                keep = torch.rand(text_embeddings.shape[0], 1, 1, device=self.device) >= self.args.text_dropout_prob
+                text_embeddings = text_embeddings * keep
             point_forecast = cast(torch.Tensor, self.model(horizon_len, context, input_padding, text_embeddings))
 
             loss = self.loss_fn(point_forecast, horizon)

@@ -168,6 +168,7 @@ def _train_and_evaluate(
         fusion_warmup_steps=config.warmup_steps,
         weight_decay=config.weight_decay,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
+        text_dropout_prob=config.get("text_dropout_prob", 0.0),
     )
 
     _logger.info(
