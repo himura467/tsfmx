@@ -51,6 +51,18 @@ class TrainingArguments:
     max_grad_norm: float = field(
         default=1.0, metadata={"help": "Maximum gradient norm for gradient clipping. Set to 0 to disable."}
     )
+    text_dropout_prob: float = field(
+        default=0.0,
+        metadata={
+            "help": (
+                "Probability of zeroing a training sample's text embeddings, resampled every step. "
+                "Trained with text always present, the fusion branch can settle into a constant offset "
+                "the forecast then depends on, which ablations see as a large degradation when text is "
+                "removed even though no text was ever read. Withholding it on a fraction of the steps "
+                "keeps the text-free forecast trained. Applies to training only, never to validation."
+            )
+        },
+    )
 
     # --- Logging & Monitoring ---
     logging_strategy: Literal["no", "epoch", "steps"] = field(
@@ -96,6 +108,8 @@ class TrainingArguments:
     )
 
     def __post_init__(self) -> None:
+        if not 0.0 <= self.text_dropout_prob <= 1.0:
+            raise ValueError(f"text_dropout_prob must be between 0 and 1, got {self.text_dropout_prob}")
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
         self.logging_dir.mkdir(parents=True, exist_ok=True)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)

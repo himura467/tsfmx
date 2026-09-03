@@ -56,6 +56,8 @@ Run a W&B Sweeps search for the fusion mode (adapter frozen, fusion layer traine
 
 The sweep configs optimize `val/best_loss`, the best validation MSE reached during a trial. Selecting on `test/mse` instead would tune the hyperparameters on the same split the reported numbers come from, which is also why `--keep-best-test-mse` and `--keep-best-test-mae` are opt-in: the checkpoints they retain are chosen on test and are not valid to report.
 
+`text_dropout_prob` zeroes a random subset of each training batch's text, resampled every step and applied to training only. Trained with text always present, the fusion branch can settle into a constant offset that the forecast then depends on — which step 6 sees as a large `drop` degradation with no matching `shuffle` one, even though no text was ever read. The sweep searches `[0.0, 0.1, 0.25, 0.5]`, so training with text always present stays reachable.
+
 **TimesFM**:
 
 ```sh
@@ -169,7 +171,7 @@ Perturbations are applied per sample index rather than per batch, so results are
 
 Read the deltas against the per-domain sample counts, which are logged and written to the `num_samples` field of the output JSON. With the default `context_len` and `horizon_len` of 32, a monthly domain's test split holds only a handful of samples, far too few to read a difference of a few percent; `--augment` raises that by up to `patch_len` times. Those added samples are overlapping windows rather than independent draws, so the confidence intervals narrow less than the raw count suggests.
 
-Note that under the current bias-free fusion projection, `drop` and zeroing the text embeddings are equivalent.
+Note that under the current bias-free fusion projection, `drop` and zeroing the text embeddings are equivalent, with or without `fusion_normalize`. Training-time `text_dropout_prob` relies on that same equivalence to withhold text without changing the batch shape.
 
 ### 7. Text Fusion Diagnostics
 

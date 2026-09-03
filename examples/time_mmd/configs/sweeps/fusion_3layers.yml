@@ -45,3 +45,7 @@ parameters:
 
   gradient_accumulation_steps:
     values: [1, 2, 4, 8]
+
+  # 0.0 reproduces training with text always present, so the previous behavior stays reachable.
+  text_dropout_prob:
+    values: [0.0, 0.1, 0.25, 0.5]
