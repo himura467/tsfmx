@@ -8,6 +8,39 @@
 pip install tsfmx[all]
 ```
 
+## Running in Docker
+
+[docker/Dockerfile](docker/Dockerfile) builds a CUDA image with the dependencies, the Time-MMD clone, and the MM-TSFlib checkout already in place, and runs the Time-MMD split at build time.
+
+```sh
+docker build -t tsfmx -f docker/Dockerfile .
+```
+
+The image clones tsfmx from GitHub rather than from the build context, so the build ignores local changes and a rebuild after a new commit needs `--no-cache`.
+
+```sh
+docker run --gpus all -it \
+  -v "$PWD/data/Fidel-TS:/tsfmx/data/Fidel-TS" \
+  -v "$PWD/data/cache:/tsfmx/data/cache" \
+  -v "$PWD/outputs:/tsfmx/outputs" \
+  -v "$HOME/.cache/huggingface:/root/.cache/huggingface" \
+  -e WANDB_API_KEY \
+  tsfmx bash
+```
+
+The four mounts are what makes a run repeatable rather than disposable:
+
+| Mount | Holds | Cost of losing it |
+| --- | --- | --- |
+| `data/Fidel-TS` | The downloaded sub-dataset | A 1.5 GB re-download |
+| `data/cache` | Pre-computed text embeddings | A full re-encode of every entity and split |
+| `outputs` | Checkpoints, sweep results, ablation and diagnostics JSON | The experiment itself |
+| `~/.cache/huggingface` | Chronos-2, TimesFM and the sentence encoder | Re-downloading the pretrained weights on every container start |
+
+They are subdirectories rather than a single mount over `data/`, which would hide the Time-MMD clone baked into the image. `--gpus all` needs the NVIDIA Container Toolkit on the host. `-e WANDB_API_KEY` forwards the host variable, which the sweeps need in order to log; drop it if you are only running evaluation.
+
+Time-MMD is ready inside the container, so the quick start below starts at step 2. Fidel-TS is not downloaded at build time — it lands in the mounted volume instead, so the sub-dataset choice is not baked into the image and the download survives a rebuild.
+
 ## Quick Start
 
 ### 1. Setup
@@ -246,6 +279,38 @@ PYTHONPATH=. uv run python scripts/eval_time_mmd_text_ablation.py \
 ```
 
 The scripts keep their `time_mmd` names, which no longer describe everything they read; `--dataset` defaults to `time_mmd`, so existing invocations are unaffected.
+
+### Running the experiment
+
+Caching all 80 `Bear_room` entities takes a while, so start with a handful. Add `--augment` and cache a second time: the ablation deltas are read against the per-domain sample counts, and the unaugmented test splits are small.
+
+Run the **unimodal baseline first**. Without it, a fusion result has nothing to be better than, and step 6's `drop` row is the only other estimate of it:
+
+```sh
+PYTHONPATH=. uv run python scripts/tune_time_mmd_adapter_sweep.py \
+    --model-config examples/time_mmd/configs/models/chronos.yml \
+    --sweep-config examples/time_mmd/configs/sweeps/adapter.yml \
+    --dataset fidel_ts --entities 104 105 107 108 110 --keep-best-val-loss
+```
+
+Then the fusion head, then the ablations and the diagnostics, exactly as in steps 3, 6 and 7 with `--dataset fidel_ts` added.
+
+What separates a successful migration from a repeat of the Time-MMD result is which rows move:
+
+| Ablation | Text is being read | Measured on Time-MMD |
+| --- | --- | --- |
+| `shuffle` | degrades clearly | -0.69% (no response) |
+| `cross_domain` | degrades | not measured |
+| `mean` | degrades | -4.0% (a constant beat the real text) |
+| `oracle`, `oracle_trend` | **improve** on `none` | not measured |
+
+Three readings follow from that:
+
+- `shuffle` does not degrade, but `oracle_trend` improves — the fusion mechanism works and the corpus is the problem.
+- Neither `shuffle` nor `oracle_trend` moves — the fault is in the mechanism, not the data, and no change of benchmark will fix it.
+- `mean` beats `none` again — the branch has settled back into a constant. Check whether the selected trial had `text_dropout_prob` at 0.0.
+
+The diagnostics then say how far the input side actually moved: `text_mean_pairwise_cosine` against Time-MMD's 0.73-0.90 measures whether the encoder now separates samples at all.
 
 ## Benchmark Comparison with MM-TSFlib
 
