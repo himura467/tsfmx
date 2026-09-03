@@ -215,5 +215,8 @@ wandb/
 # Time-MMD dataset (cloned via scripts/clone_time_mmd.sh)
 data/Time-MMD/
 
+# Fidel-TS datasets (downloaded via scripts/download_fidel_ts.sh)
+data/Fidel-TS/
+
 # External repos
 third_party/

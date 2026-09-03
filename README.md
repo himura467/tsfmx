@@ -192,6 +192,28 @@ A high `projection_vs_ts_rms` is a third failure: the text reaches the backbone 
 
 Finally it compares the domains against each other, for the text embeddings and for the projection output, over up to `--cosine-sample-size` samples per domain: the domain-by-domain mean pairwise cosine matrix, and `separability`, the mean within-domain cosine minus the mean cross-domain cosine. This settles a question the ablations raise but cannot answer. When `mean` beats `none` the fusion branch is contributing a per-domain constant rather than reading the text, and separability says whether the representation carries the domain identity that would make such a constant learnable at all.
 
+## Fidel-TS
+
+[Fidel-TS](https://arxiv.org/abs/2509.24789) is a second benchmark, added because Time-MMD cannot support the control the ablations in step 6 call for. Its textual CSVs carry `start_date` and `end_date` — the period a report *covers* — and no publication timestamp, so there is no way to check that a document was available when the forecast was made. A report stating March's realized figure was published after March ended, yet step 6 hands it to a model forecasting April.
+
+Fidel-TS records each report under the timestamp it was *issued*, and keeps the successive versions of a forecast, so the version available at prediction time can be identified. Download one sub-dataset with:
+
+```sh
+./scripts/download_fidel_ts.sh Bear_room
+```
+
+The argument names any sub-dataset in the [fidel-ts collection](https://huggingface.co/collections/fidel-ts/fidel-ts): `Bear_room`, `California_ISO`, `Canada_photovoltaics_plants`, `Germany_Renewable_Energy_Grid`, `Jena_Atmospheric_Physics`, `NYC_traffic_speed`. The `raw_data/` archives are skipped, holding the unprocessed dumps the dataset's own cleaning scripts already consumed. Reading the time series needs the `fidel` extra, for parquet support.
+
+### As-of text retrieval
+
+[FidelTsDataset](examples/fidel_ts/data/fidel_ts_dataset.py) retrieves text by the time it *became available* rather than by the period it describes. This is what lets a forecast-bearing report reach the model without any change to the fusion mechanism: every report legitimately usable at prediction time was issued at or before it, so each one falls inside the context window and lands on a context patch. A weather report issued at the last context timestamp — "the weather is expected to remain overcast" — is text about the horizon, delivered through a context-side slot.
+
+Reports are sampled far more coarsely than the series (weather every 6 hours against 5-minute readings), so a patch rarely contains one. Each patch takes the most recent report at or before its final timestamp: the statement in force over that patch, which is also what a forecaster would have had in hand.
+
+Static text (`general_info`, `channel_info`) is deliberately left out. It is constant per series, and a constant is what the fusion branch degenerates into when the text carries nothing else, so including it would make that degeneracy indistinguishable from success.
+
+On `Bear_room` room 104 at the default context and horizon of 32, this yields 1859 samples with no empty text patch, 783 distinct weather sentences and 106 distinct control sentences over 3718 patch slots, and no single control sentence covering more than 16% of them. Time-MMD's text, by contrast, reports a `text_mean_pairwise_cosine` of 0.73-0.90.
+
 ## Benchmark Comparison with MM-TSFlib
 
 [MM-TSFlib](https://github.com/AdityaLab/MM-TSFlib) is cloned under `third_party/MM-TSFlib` (not tracked by git). MM-TSFlib is run on its own pre-processed Time-MMD CSVs; tsfmx is evaluated on the raw Time-MMD data split 70/10/20. Both cover the same underlying domains and split ratio.
