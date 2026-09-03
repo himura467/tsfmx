@@ -39,8 +39,13 @@ viz = [
 bench = [
     "scikit-learn>=1.8.0",
 ]
+# The Fidel-TS example reads its time series from parquet files.
+fidel = [
+    "pyarrow>=21.0.0",
+]
 all = [
     "matplotlib>=3.10.9",
+    "pyarrow>=21.0.0",
     "scikit-learn>=1.8.0",
     "wandb>=0.25.0",
 ]
