@@ -151,12 +151,19 @@ PYTHONPATH=. uv run python scripts/eval_time_mmd_text_ablation.py \
 | `drop` | Removes text entirely, so the decoder skips fusion. | The fusion branch contributes something, but not necessarily by reading the text. |
 | `mean` | Replaces every sample's text with the dataset mean. | Between-sample variation is used. *Matching* `none` instead means the fusion output has collapsed to a learned constant. |
 | `shuffle` | Gives each sample another sample's text, via a derangement over the split. | The model uses the *content* of the text, not merely its presence. |
+| `cross_domain` | Gives each sample another domain's text, paired by position. | The model reads more than the domain identity the text carries. |
 | `permute_patches` | Shuffles patch order within each sample's own text. | The model uses the temporal alignment between text and patches. |
 | `noise` | Adds Gaussian noise scaled by the split's embedding std. | Graded robustness curve; scale it with `--noise-scale`. |
+| `oracle` | Replaces the text with the sample's own future, written out as numbers. | Read in reverse — see below. |
+| `oracle_trend` | Replaces it with the same future described in words. | Read in reverse — see below. |
 
-The telling comparison is `drop` against `shuffle`. If both degrade by a similar amount, the model is reading the text. If `drop` degrades but `shuffle` does not, the fusion branch is contributing independently of what the text actually says, and `mean` distinguishes the two readings.
+The telling comparison is `drop` against `shuffle`. If both degrade by a similar amount, the model is reading the text. If `drop` degrades but `shuffle` does not, the fusion branch is contributing independently of what the text actually says, and `mean` distinguishes the two readings. `cross_domain` separates one more explanation from those: `shuffle` leaves the domain intact, so text that only identifies the domain survives it, and only `cross_domain` destroys that too.
+
+The oracles invert the question. Every other row degrades the text and asks whether the forecast notices; these hand the model text that is by construction worth reading, so they should *improve* on `none`. No improvement means the model cannot use text at all, whatever the corpus says; an improvement places the fault in the corpus rather than in the fusion mechanism. `oracle_trend` exists because sentence encoders represent magnitude poorly: `oracle` failing on its own would be ambiguous between a fusion branch that cannot carry sample-specific information and an encoder that cannot read a list of floats. Both consume the labels, so neither is a forecasting result.
 
 Perturbations are applied per sample index rather than per batch, so results are independent of batch size and iteration order, and reproducible for a given `--seed`. Use `--ablations` to run a subset (`none` is always included as the reference), `--domains` to select domains, and `--augment` to evaluate on the augmented cache from step 2.
+
+`cross_domain` takes its text from the next entry in `--domains`, cycling, and is skipped with a warning when fewer than two domains load. The pairing is positional, so it destroys the domain identity without preserving the date alignment. The oracles synthesize text and so load the text encoder named by the model config, which must be the one the cache was built with; they run by default, so pass `--ablations` explicitly to skip that load.
 
 Read the deltas against the per-domain sample counts, which are logged and written to the `num_samples` field of the output JSON. With the default `context_len` and `horizon_len` of 32, a monthly domain's test split holds only a handful of samples, far too few to read a difference of a few percent; `--augment` raises that by up to `patch_len` times. Those added samples are overlapping windows rather than independent draws, so the confidence intervals narrow less than the raw count suggests.
 

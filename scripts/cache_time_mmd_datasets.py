@@ -10,15 +10,11 @@ import argparse
 from pathlib import Path
 from typing import Literal
 
-import torch
-
+from examples.time_mmd.builders import build_text_encoder
 from examples.time_mmd.configs.forecast import ForecastConfig
 from examples.time_mmd.configs.model import ModelConfig
 from examples.time_mmd.data.time_mmd_dataset import TimeMmdDataset
 from tsfmx.data.preprocess import PreprocessPipeline
-from tsfmx.text_encoder.base import TextEncoderBase
-from tsfmx.text_encoder.english import EnglishTextEncoder
-from tsfmx.text_encoder.japanese import JapaneseTextEncoder
 from tsfmx.utils.device import resolve_device
 from tsfmx.utils.logging import setup_logger
 from tsfmx.utils.seed import set_seed
@@ -60,33 +56,6 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _build_text_encoder(
-    text_encoder_type: Literal["english", "japanese"],
-    device: torch.device,
-) -> TextEncoderBase:
-    """Instantiate a text encoder for the given type.
-
-    Args:
-        text_encoder_type: Which encoder to use — "english" or "japanese".
-        device: Device to run the encoder on.
-
-    Returns:
-        Initialized TextEncoderBase instance.
-
-    Raises:
-        ValueError: If text_encoder_type is not recognized.
-    """
-    match text_encoder_type:
-        case "english":
-            _logger.info("Initializing EnglishTextEncoder")
-            return EnglishTextEncoder(device=device)
-        case "japanese":
-            _logger.info("Initializing JapaneseTextEncoder")
-            return JapaneseTextEncoder(device=device)
-        case _:
-            raise ValueError(f"Unknown text encoder type: {text_encoder_type!r}")
-
-
 def main() -> int:
     """Entry point: cache text embeddings for all (or selected) Time-MMD domains.
 
@@ -118,7 +87,7 @@ def main() -> int:
     device = resolve_device()
     _logger.info("Using device: %s", device)
 
-    text_encoder = _build_text_encoder(text_encoder_type, device)
+    text_encoder = build_text_encoder(text_encoder_type, device)
 
     data_path = Path(args.data_path)
     if args.domains:

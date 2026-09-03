@@ -5,14 +5,15 @@ import argparse
 import json
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.utils.data import ConcatDataset
 
-from examples.time_mmd.builders import build_decoder
+from examples.time_mmd.builders import build_decoder, build_text_encoder
 from examples.time_mmd.configs.forecast import ForecastConfig
 from examples.time_mmd.configs.model import ModelConfig
 from examples.time_mmd.cross_validation import DomainSpec, load_split_dataset
-from tsfmx.ablation import TEXT_ABLATIONS, TextAblatedDataset, TextAblation
+from tsfmx.ablation import ORACLE_ABLATIONS, TEXT_ABLATIONS, TextAblatedDataset, TextAblation, TextEncodeFn
 from tsfmx.data.collate import adapter_collate_fn, collate_fn_for_mode
 from tsfmx.data.loader import build_dataloader
 from tsfmx.evaluator import MultimodalEvaluator
@@ -67,6 +68,26 @@ def _order_ablations(ablations: list[str]) -> list[TextAblation]:
     return [a for a in TEXT_ABLATIONS if a in requested]
 
 
+def _build_encode_fn(model_config: ModelConfig, device: torch.device) -> TextEncodeFn:
+    """Load the text encoder the cache was built with, wrapped for the oracle ablations.
+
+    Args:
+        model_config: Model configuration naming the text encoder type.
+        device: Device to run the encoder on.
+
+    Returns:
+        Callable mapping sentences to embeddings of shape (len(texts), text_dims).
+    """
+    encoder = build_text_encoder(model_config.fusion.text_encoder_type, device)
+    encoder.eval()
+
+    def encode(texts: list[str]) -> np.ndarray:
+        with torch.no_grad():
+            return encoder(texts).cpu().numpy().astype(np.float32)
+
+    return encode
+
+
 def _percent_delta(value: float, reference: float) -> float:
     """Return the change of value against reference as a percentage."""
     if reference == 0.0:
@@ -83,6 +104,8 @@ def _evaluate_domain(
     seed: int,
     noise_scale: float,
     device: torch.device,
+    donor: ConcatDataset[PreprocessedSample] | None,
+    encode: TextEncodeFn | None,
 ) -> dict[str, dict[str, float]]:
     """Evaluate one domain's test split under every requested ablation.
 
@@ -95,6 +118,8 @@ def _evaluate_domain(
         seed: Seed for the ablation perturbations.
         noise_scale: Multiplier on the embedding std for the 'noise' ablation.
         device: Device to run inference on.
+        donor: Another domain's split, supplying the text for 'cross_domain'.
+        encode: Text encoder callable used by the oracle ablations.
 
     Returns:
         Mapping from ablation name to its metrics and percentage deltas against 'none'.
@@ -103,7 +128,14 @@ def _evaluate_domain(
     reference: dict[str, float] | None = None
 
     for ablation in ablations:
-        ablated = TextAblatedDataset(test_dataset, ablation, seed=seed, noise_scale=noise_scale)
+        ablated = TextAblatedDataset(
+            test_dataset,
+            ablation,
+            seed=seed,
+            noise_scale=noise_scale,
+            donor=donor if ablation == "cross_domain" else None,
+            encode=encode,
+        )
         # 'drop' strips text_embeddings, which the multimodal collate function requires.
         collate_fn = adapter_collate_fn if ablation == "drop" else collate_fn_for_mode(mode)
         metrics = evaluator.evaluate(build_dataloader(ablated, batch_size, collate_fn, device))
@@ -197,16 +229,16 @@ def main() -> int:
             "Text ablations only apply to 'fusion' and 'finetune' checkpoints."
         )
 
-    ablations = _order_ablations(args.ablations)
+    ablations: list[TextAblation] = _order_ablations(args.ablations)
     _logger.info("Running ablations: %s", ablations)
 
-    evaluator = MultimodalEvaluator(model, device)
-    results: dict[str, dict[str, dict[str, float]]] = {}
+    # Every split is loaded before evaluation begins, because 'cross_domain' takes one domain's
+    # text while forecasting another's series and so needs a second split already in hand.
+    datasets: dict[str, ConcatDataset[PreprocessedSample]] = {}
     num_samples: dict[str, int] = {}
-
     for domain in args.domains:
         try:
-            test_dataset = load_split_dataset(
+            datasets[domain] = load_split_dataset(
                 domain_specs=[DomainSpec(name=f"{domain}_test", augment=args.augment)],
                 text_encoder_type=model_config.fusion.text_encoder_type,
                 patch_len=model_config.adapter.patch_len,
@@ -218,15 +250,36 @@ def main() -> int:
         except Exception as e:
             _logger.warning("Skipping %s: %s", domain, e)
             continue
-
-        num_samples[domain] = len(test_dataset)
+        num_samples[domain] = len(datasets[domain])
         _logger.info("%s: %d test samples", domain, num_samples[domain])
-        results[domain] = _evaluate_domain(
-            evaluator, test_dataset, ablations, mode, args.batch_size, args.seed, args.noise_scale, device
-        )
 
-    if not results:
+    if not datasets:
         raise RuntimeError("No domains could be evaluated; check --domains and --cache-dir.")
+
+    loaded = list(datasets)
+    if "cross_domain" in ablations and len(loaded) < 2:
+        _logger.warning("Dropping 'cross_domain': it needs at least 2 domains, but only %s loaded", loaded)
+        ablations = [a for a in ablations if a != "cross_domain"]
+
+    encode = _build_encode_fn(model_config, device) if any(a in ORACLE_ABLATIONS for a in ablations) else None
+
+    evaluator = MultimodalEvaluator(model, device)
+    results: dict[str, dict[str, dict[str, float]]] = {}
+
+    for i, domain in enumerate(loaded):
+        _logger.info("Evaluating %s", domain)
+        results[domain] = _evaluate_domain(
+            evaluator,
+            datasets[domain],
+            ablations,
+            mode,
+            args.batch_size,
+            args.seed,
+            args.noise_scale,
+            device,
+            donor=datasets[loaded[(i + 1) % len(loaded)]],
+            encode=encode,
+        )
 
     results["macro"] = _macro_average(results, ablations)
     _log_table(results, ablations)
