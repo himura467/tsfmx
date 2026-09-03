@@ -14,9 +14,15 @@ DATASET="${1:-Bear_room}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
 TARGET_DIR="$REPO_DIR/data/Fidel-TS/$DATASET"
 
-if [[ -d "$TARGET_DIR" ]]; then
+# A download that fails partway leaves the directory behind, so completion is judged by the
+# time series having arrived rather than by the directory existing.
+if [[ -d "$TARGET_DIR/time_series" ]]; then
   echo "Fidel-TS $DATASET already exists at $TARGET_DIR, skipping download."
   exit 0
+fi
+if [[ -d "$TARGET_DIR" ]]; then
+  echo "Removing incomplete download at $TARGET_DIR."
+  rm -rf "$TARGET_DIR"
 fi
 
 mkdir -p "$REPO_DIR/data/Fidel-TS"
