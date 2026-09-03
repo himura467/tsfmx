@@ -1,15 +1,44 @@
-"""Adapter and decoder construction from a Time-MMD model config."""
+"""Adapter, decoder, and text encoder construction from a Time-MMD model config."""
+
+from typing import Literal
 
 import torch
 
 from examples.time_mmd.configs.model import ModelConfig
 from tsfmx.decoder import MultimodalDecoder, MultimodalDecoderConfig
+from tsfmx.text_encoder.base import TextEncoderBase
+from tsfmx.text_encoder.english import EnglishTextEncoder
+from tsfmx.text_encoder.japanese import JapaneseTextEncoder
 from tsfmx.tsfm.base import TsfmAdapter
 from tsfmx.tsfm.chronos import Chronos2Adapter
 from tsfmx.tsfm.timesfm import TimesFM2p5Adapter
 from tsfmx.utils.logging import get_logger
 
 _logger = get_logger()
+
+
+def build_text_encoder(text_encoder_type: Literal["english", "japanese"], device: torch.device) -> TextEncoderBase:
+    """Instantiate the text encoder named by the config.
+
+    Args:
+        text_encoder_type: Which encoder to use — "english" or "japanese".
+        device: Device to run the encoder on.
+
+    Returns:
+        Initialized TextEncoderBase instance.
+
+    Raises:
+        ValueError: If text_encoder_type is not recognized.
+    """
+    match text_encoder_type:
+        case "english":
+            _logger.info("Initializing EnglishTextEncoder")
+            return EnglishTextEncoder(device=device)
+        case "japanese":
+            _logger.info("Initializing JapaneseTextEncoder")
+            return JapaneseTextEncoder(device=device)
+        case _:
+            raise ValueError(f"Unknown text encoder type: {text_encoder_type!r}")
 
 
 def build_adapter(model_config: ModelConfig, device: torch.device) -> TsfmAdapter:
