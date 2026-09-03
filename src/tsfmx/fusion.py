@@ -10,9 +10,10 @@ class MultimodalFusion(nn.Module):
 
     Projects text_embeddings to ts_embedding_dims, then adds element-wise.
 
-    Diagnostics on a trained checkpoint showed the projection output reaching roughly twice
-    the magnitude of the time series embeddings it is added to, which `normalize` exists to
-    control. It defaults to off, so the module is unchanged unless asked.
+    Diagnostics on a trained checkpoint showed the projection output reaching a magnitude
+    rivalling the time series embeddings it is added to, which `normalize` exists to control;
+    `projection_vs_ts_rms` in scripts/diagnose_time_mmd_text_fusion.py reports that ratio.
+    It defaults to off, so the module is unchanged unless asked.
     """
 
     def __init__(
