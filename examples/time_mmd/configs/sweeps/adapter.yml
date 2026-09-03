@@ -1,7 +1,8 @@
 method: bayes
 
+# Selecting on test/mse would tune the hyperparameters on the split the reported numbers come from.
 metric:
-  name: test/mse
+  name: val/best_loss
   goal: minimize
 
 parameters:

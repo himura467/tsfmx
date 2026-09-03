@@ -54,6 +54,8 @@ PYTHONPATH=. uv run python scripts/cache_time_mmd_datasets.py \
 
 Run a W&B Sweeps search for the fusion mode (adapter frozen, fusion layer trained):
 
+The sweep configs optimize `val/best_loss`, the best validation MSE reached during a trial. Selecting on `test/mse` instead would tune the hyperparameters on the same split the reported numbers come from, which is also why `--keep-best-test-mse` and `--keep-best-test-mae` are opt-in: the checkpoints they retain are chosen on test and are not valid to report.
+
 **TimesFM**:
 
 ```sh
@@ -173,11 +175,13 @@ PYTHONPATH=. uv run python scripts/diagnose_time_mmd_text_fusion.py \
     --augment
 ```
 
-It splits both the text embeddings and the fusion projection output into the component shared by every sample and the component that varies between samples, reported as `text_variation_ratio` and `projection_variation_ratio`. `constant_vs_ts` and `varying_vs_ts` put those two components on the scale of the time series embeddings they are added to.
+It splits the text embeddings, the fusion projection output, and the time series embeddings each into `*_constant_rms`, the component shared by every sample, and `*_varying_rms`, the component that differs between samples. Both are root mean squares, so they are orthogonal parts of one magnitude, and `*_varying_fraction` reports the varying part as a share of it: 0 is fully collapsed, 1 is nothing shared. `constant_vs_ts_rms`, `varying_vs_ts_rms`, and `projection_vs_ts_rms` put the projection on the scale of the time series embeddings fusion adds it to, divided by their *total* magnitude — those embeddings vary strongly between samples and share correspondingly little, so dividing by their shared component inflates every ratio instead.
 
-A low `text_variation_ratio`, or a `text_mean_pairwise_cosine` near 1, means the signal is already gone at the encoder and no fusion mechanism could recover it: `all-MiniLM-L6-v2` truncates at 256 tokens and silently drops the tail of a multi-article patch. A healthy `text_variation_ratio` with a low `projection_variation_ratio` means the additive projection is discarding it instead.
+A low `text_varying_fraction`, or a `text_mean_pairwise_cosine` near 1, means the signal is already gone at the encoder and no fusion mechanism could recover it: `all-MiniLM-L6-v2` truncates at 256 tokens and silently drops the tail of a multi-article patch, and a patch with no text at all is encoded as the empty string, which maps every such patch to one fixed vector. A healthy `text_varying_fraction` with a low `projection_varying_fraction` means the additive projection is discarding it instead.
 
-A high `varying_vs_ts` is a third failure, and the one measured so far: the text reaches the backbone intact but at a magnitude rivalling the time series representation, with no way for the model to admit less of it. The `fusion_normalize` option answers that, dividing out the projection's own output scale and replacing it with an explicit learned one. [chronos_normalized.yml](examples/time_mmd/configs/models/chronos_normalized.yml) enables it; pass it to the step 3 sweep as `--model-config`, then re-run this script to see how far `varying_vs_ts` fell. It defaults to off, so checkpoints trained before it are unaffected.
+A high `projection_vs_ts_rms` is a third failure: the text reaches the backbone intact but at a magnitude rivalling the time series representation, with no way for the model to admit less of it. The `fusion_normalize` option answers that, dividing out the projection's own output scale and replacing it with an explicit learned one. [chronos_normalized.yml](examples/time_mmd/configs/models/chronos_normalized.yml) enables it; pass it to the step 3 sweep as `--model-config`, then re-run this script to see how far `projection_vs_ts_rms` fell. It defaults to off, so checkpoints trained before it are unaffected.
+
+Finally it compares the domains against each other, for the text embeddings and for the projection output, over up to `--cosine-sample-size` samples per domain: the domain-by-domain mean pairwise cosine matrix, and `separability`, the mean within-domain cosine minus the mean cross-domain cosine. This settles a question the ablations raise but cannot answer. When `mean` beats `none` the fusion branch is contributing a per-domain constant rather than reading the text, and separability says whether the representation carries the domain identity that would make such a constant learnable at all.
 
 ## Benchmark Comparison with MM-TSFlib
 
