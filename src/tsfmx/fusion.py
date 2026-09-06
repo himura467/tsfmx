@@ -33,7 +33,11 @@ class MultimodalFusion(nn.Module):
         layers: list[nn.Module] = []
         for i in range(len(dims) - 1):
             layers.append(nn.Linear(dims[i], dims[i + 1], bias=False))  # bias deemed unnecessary by W&B Sweeps
-            layers.append(nn.ReLU())
+            # No activation after the last Linear: it would confine the projection to the
+            # non-negative orthant, where fusion can only add to the time series embedding and
+            # every projected sample is similar to every other by construction.
+            if i < len(dims) - 2:
+                layers.append(nn.ReLU())
         if normalize:
             # Divides out the projection's own output scale and replaces it with an explicit
             # learned one, so the model can admit less text instead of being forced to accept
