@@ -48,7 +48,7 @@ ORACLE_ABLATIONS: tuple[TextAblation, ...] = ("oracle", "oracle_trend")
 TextEncodeFn = Callable[[list[str]], "npt.NDArray[np.float32]"]
 
 
-def _derangement(size: int, seed: int) -> npt.NDArray[np.int64]:
+def derangement(size: int, seed: int) -> npt.NDArray[np.int64]:
     """Build a permutation of range(size) that leaves no element in place.
 
     A plain random permutation would leave roughly one sample paired with its own text,
@@ -213,7 +213,7 @@ class TextAblatedDataset(Dataset[PreprocessedSample]):
 
         self._validate()
 
-        self._perm = _derangement(self._len, seed) if ablation == "shuffle" else None
+        self._perm = derangement(self._len, seed) if ablation == "shuffle" else None
         self._mean_embeddings = self._compute_mean_embeddings() if ablation == "mean" else None
         self._noise_std = self._estimate_noise_std() if ablation == "noise" else 0.0
         self._oracle_embeddings = self._compute_oracle_embeddings() if ablation in ORACLE_ABLATIONS else None
