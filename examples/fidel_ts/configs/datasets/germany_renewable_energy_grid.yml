@@ -1,0 +1,27 @@
+name: Germany_Renewable_Energy_Grid
+
+# This sub-dataset puts its imputed series under impute_data rather than time_series.
+time_series_dir: impute_data
+target_column: power
+timestamp_column: time
+
+# Series are named after the grid operator, weather after the city hosting its station.
+entity_locations:
+  solar_50Hertz: Berlin-50Hertz
+  wind_50Hertz: Berlin-50Hertz
+  solar_Amprion: Dortmund-Amprion
+  wind_Amprion: Dortmund-Amprion
+  solar_TenneT: Bayreuth-TenneT
+  wind_TenneT: Bayreuth-TenneT
+  solar_TransnetBW: Stuttgart-TransnetBW
+  wind_TransnetBW: Stuttgart-TransnetBW
+
+# Six-hourly, sharded by year, and keyed by the time of issue. The fields are forward-looking
+# ("The weather is expected to remain mostly clear"), which is what makes this sub-dataset worth
+# the move: a wind or solar plant's output follows the forecast, and the forecast is not recoverable
+# from the generation history. The sibling fast_general_weather_forecast_*.json is keyed by day
+# rather than by minute and does not parse against the report key format.
+text_sources:
+  - name: Forecast
+    path: weather/{location}/weather_report/fast_general_formal_forecast_*.json
+    per_entity: true
