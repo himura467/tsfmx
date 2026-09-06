@@ -38,8 +38,7 @@ class MultimodalFusion(nn.Module):
             # Divides out the projection's own output scale and replaces it with an explicit
             # learned one, so the model can admit less text instead of being forced to accept
             # whatever magnitude the projection happens to produce. RMSNorm rather than
-            # LayerNorm because centering would destroy the component shared across samples,
-            # which the ablations identified as the useful part of the offset.
+            # LayerNorm because scale, not offset, is the failure it corrects.
             layers.append(nn.RMSNorm(ts_embedding_dims))
         # Normalization lives inside `projection` so that it stays the single expression of
         # what fusion adds, and callers cannot read a partial transform.
