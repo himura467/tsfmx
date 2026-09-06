@@ -1,5 +1,6 @@
 """Multimodal decoder for time series forecasting with text fusion."""
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,11 @@ from torch import nn
 from tsfmx.fusion import MultimodalFusion
 from tsfmx.tsfm.base import TsfmAdapter
 from tsfmx.types import Batch, TrainingMode
+from tsfmx.utils.logging import get_logger
+
+_logger = get_logger()
+
+_PROJECTION_WEIGHT = re.compile(r"^projection\.(\d+)\.weight$")
 
 
 @dataclass
@@ -42,11 +48,61 @@ class MultimodalDecoder(nn.Module):
             normalize=config.fusion_normalize,
         )
 
+    @staticmethod
+    def _fusion_config_from_state_dict(state_dict: dict[str, Any]) -> MultimodalDecoderConfig:
+        """Recover the fusion architecture from the shapes its weights were saved with.
+
+        A checkpoint records no architecture, and a sweep trial picks its own, so the loading
+        script would otherwise have to restate that trial's hyperparameters. Within `projection`
+        the Linear weights are the 2-D entries and the optional trailing RMSNorm is the 1-D one.
+
+        Args:
+            state_dict: A MultimodalFusion state dict.
+
+        Returns:
+            Config describing the architecture the weights belong to.
+
+        Raises:
+            ValueError: If the state dict holds no projection weight to read.
+        """
+        entries: list[tuple[int, torch.Tensor]] = []
+        for key, value in state_dict.items():
+            match = _PROJECTION_WEIGHT.match(key)
+            if match is not None:
+                entries.append((int(match.group(1)), value))
+        entries.sort(key=lambda entry: entry[0])
+
+        linear_weights = [value for _, value in entries if value.ndim == 2]
+        if not linear_weights:
+            raise ValueError("Fusion state dict holds no 2-D projection weight to read an architecture from.")
+
+        return MultimodalDecoderConfig(
+            text_embedding_dims=int(linear_weights[0].shape[1]),
+            num_fusion_layers=len(linear_weights),
+            fusion_hidden_dims=[int(weight.shape[0]) for weight in linear_weights[:-1]],
+            fusion_normalize=any(value.ndim == 1 for _, value in entries),
+        )
+
+    def _rebuild_fusion(self, config: MultimodalDecoderConfig) -> None:
+        """Replace the fusion module with one shaped by `config`, on the device it already uses."""
+        device = next(self.fusion.parameters()).device
+        self.config = config
+        self.fusion = MultimodalFusion(
+            ts_embedding_dims=self.adapter.model_dims,
+            text_embedding_dims=config.text_embedding_dims,
+            num_layers=config.num_fusion_layers,
+            hidden_dims=config.fusion_hidden_dims,
+            normalize=config.fusion_normalize,
+        ).to(device)
+
     def load_checkpoint(self, path: Path) -> TrainingMode:
         """Load a training checkpoint, auto-detecting the checkpoint type.
 
         Supports all three training modes (fusion, finetune, and adapter) by
         inspecting which state-dict keys are present in the file.
+
+        The fusion module is rebuilt whenever the checkpoint's saved shapes disagree with the one
+        this decoder was constructed with.
 
         Args:
             path: Path to a .pt checkpoint file.
@@ -73,6 +129,10 @@ class MultimodalDecoder(nn.Module):
             )
 
         if has_fusion:
+            saved_config = self._fusion_config_from_state_dict(checkpoint["fusion_state_dict"])
+            if saved_config != self.config:
+                _logger.info("Rebuilding fusion to match %s: %s (constructed as %s)", path, saved_config, self.config)
+                self._rebuild_fusion(saved_config)
             self.fusion.load_state_dict(checkpoint["fusion_state_dict"])
         if has_adapter:
             self.adapter.load_state_dict(checkpoint["adapter_state_dict"])
