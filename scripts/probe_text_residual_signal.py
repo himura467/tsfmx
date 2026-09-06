@@ -266,25 +266,53 @@ def _cross_validate(
 def _transfer(
     train_features: npt.NDArray[np.float64],
     train_targets: npt.NDArray[np.float64],
-    test_features: npt.NDArray[np.float64],
-    test_targets: npt.NDArray[np.float64],
+    target_features: npt.NDArray[np.float64],
+    target_targets: npt.NDArray[np.float64],
     n_components: int,
     alphas: list[float],
     num_text: int,
-) -> float:
-    """Fit on the whole training split and score on test, answering whether the fit transfers."""
+    prefix: str,
+) -> dict[str, float]:
+    """Fit on the whole training split and score on a later one.
+
+    Scores the same three nested models the cross-validation uses, so that the increment the text
+    is worth can be read out of period as well as within it.
+
+    The validation split is the one that decides which fusion head a sweep keeps, and it sits
+    between train and test. Text whose contribution is already gone by validation cannot be kept
+    by a search that selects on validation loss, whatever the mechanism is capable of.
+
+    Args:
+        train_features: Training features, text columns then time columns.
+        train_targets: Training targets.
+        target_features: Features of the split being transferred to.
+        target_targets: Targets of the split being transferred to.
+        n_components: PCA dimension applied to the text columns.
+        alphas: Ridge penalties to search.
+        num_text: Number of leading text columns.
+        prefix: Key prefix naming the split, 'val' or 'test'.
+
+    Returns:
+        Scores for the text, time and both models, and the increment of the last over the second.
+    """
     from sklearn.metrics import r2_score
 
-    pipeline = _pipeline("text", n_components, alphas, num_text)
-    pipeline.fit(train_features, train_targets.reshape(len(train_targets), -1))
-    predictions = pipeline.predict(test_features).reshape(len(test_features), -1)
-    return float(r2_score(test_targets.reshape(len(test_targets), -1), predictions, multioutput="uniform_average"))
+    scores: dict[str, float] = {}
+    for kind in ("text", "time", "both"):
+        pipeline = _pipeline(kind, n_components, alphas, num_text)
+        pipeline.fit(train_features, train_targets.reshape(len(train_targets), -1))
+        predictions = pipeline.predict(target_features).reshape(len(target_features), -1)
+        scores[f"{prefix}_r2_{kind}"] = float(
+            r2_score(target_targets.reshape(len(target_targets), -1), predictions, multioutput="uniform_average")
+        )
+
+    scores[f"{prefix}_increment"] = scores[f"{prefix}_r2_both"] - scores[f"{prefix}_r2_time"]
+    return scores
 
 
 def _probe_domain(
     model: MultimodalDecoder,
-    train_dataset: Any,
-    test_dataset: Any,
+    datasets: dict[str, Any],
     args: argparse.Namespace,
     device: torch.device,
 ) -> dict[str, Any]:
@@ -292,24 +320,26 @@ def _probe_domain(
 
     Args:
         model: Decoder used for the unimodal forecast.
-        train_dataset: Training split.
-        test_dataset: Test split.
+        datasets: The 'train', 'val' and 'test' splits.
         args: Parsed arguments carrying the grids and fold count.
         device: Device to run on.
 
     Returns:
         Per-dimension scores plus the split sizes and residual scale.
     """
-    train_text, train_residuals, train_time = _collect(model, train_dataset, args.batch_size, device)
-    test_text, test_residuals, test_time = _collect(model, test_dataset, args.batch_size, device)
+    train_text, train_residuals, train_time = _collect(model, datasets["train"], args.batch_size, device)
+    val_text, val_residuals, val_time = _collect(model, datasets["val"], args.batch_size, device)
+    test_text, test_residuals, test_time = _collect(model, datasets["test"], args.batch_size, device)
 
     num_text = train_text.shape[1]
     train_features = np.hstack([train_text, train_time])
+    val_features = np.hstack([val_text, val_time])
     test_features = np.hstack([test_text, test_time])
     # Deranging the text columns alone leaves the clock aligned, so the null says what a model
     # already holding the timestamp gains from text that belongs to another sample.
     shuffled = np.hstack([train_text[derangement(len(train_text), args.seed)], train_time])
     train_mean = train_residuals.mean(axis=1)
+    val_mean = val_residuals.mean(axis=1)
     test_mean = test_residuals.mean(axis=1)
 
     # PCA cannot ask for more components than the smallest fold provides.
@@ -348,9 +378,8 @@ def _probe_domain(
                 "cv_r2_text_increment": r2_both - r2_time,
                 "cv_r2_text_increment_null": r2_both_null - r2_time,
                 "ridge_alpha": alpha,
-                "transfer_r2_mean": _transfer(
-                    train_features, train_mean, test_features, test_mean, k, args.alphas, num_text
-                ),
+                **_transfer(train_features, train_mean, val_features, val_mean, k, args.alphas, num_text, "val"),
+                **_transfer(train_features, train_mean, test_features, test_mean, k, args.alphas, num_text, "test"),
             }
         )
 
@@ -360,6 +389,7 @@ def _probe_domain(
         "cv_corr_time": corr_time,
         "residual_rms": float(np.sqrt(np.mean(test_residuals**2))),
         "num_train": float(len(train_features)),
+        "num_val": float(len(val_features)),
         "num_test": float(len(test_features)),
         "num_text_features": float(num_text),
         "num_time_features": float(train_time.shape[1]),
@@ -400,17 +430,17 @@ def main() -> int:
                     cache_dir=Path(args.cache_dir),
                     mode="fusion",
                 )
-                for split in ("train", "test")
+                for split in ("train", "val", "test")
             }
         except Exception as e:
             _logger.warning("Skipping %s: %s", domain, e)
             continue
 
-        results[domain] = _probe_domain(model, splits["train"], splits["test"], args, device)
+        results[domain] = _probe_domain(model, splits, args, device)
         best = max(results[domain]["curve"], key=lambda row: row["cv_r2_text_increment"])
         _logger.info(
-            "%s: time alone %.4f | text %.4f (null %.4f, corr %.3f) | text over time %.4f "
-            "(null %.4f) at %d components, transfer %.4f",
+            "%s: time alone %.4f | text %.4f (null %.4f, corr %.3f) | text over time: cv %.4f "
+            "(null %.4f), val %.4f, test %.4f — at %d components",
             domain,
             results[domain]["cv_r2_time"],
             best["cv_r2_mean"],
@@ -418,8 +448,9 @@ def main() -> int:
             best["cv_corr_mean"],
             best["cv_r2_text_increment"],
             best["cv_r2_text_increment_null"],
+            best["val_increment"],
+            best["test_increment"],
             int(best["n_components"]),
-            best["transfer_r2_mean"],
         )
 
     if not results:
