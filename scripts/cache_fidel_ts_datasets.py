@@ -88,7 +88,7 @@ def main() -> int:
     if not data_dir.exists():
         raise FileNotFoundError(f"Sub-dataset not found: {data_dir}. Run scripts/download_fidel_ts.sh first.")
 
-    entities = args.entities or FidelTsDataset.list_entities(data_dir)
+    entities = args.entities or FidelTsDataset.list_entities(data_dir, dataset_config.time_series_dir)
     _logger.info("Caching %d entities of %s: %s", len(entities), dataset_config.name, entities)
 
     pipeline = PreprocessPipeline(Path(args.cache_dir))
@@ -122,6 +122,9 @@ def main() -> int:
                     split=split,
                     train_ratio=args.train_ratio,
                     val_ratio=args.val_ratio,
+                    time_series_dir=dataset_config.time_series_dir,
+                    location=dataset_config.entity_locations.get(entity),
+                    std_floor_ratio=dataset_config.std_floor_ratio,
                 )
 
             pipeline.prepare(

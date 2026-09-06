@@ -34,8 +34,11 @@ class TextSource:
     Attributes:
         name: Label prefixed to each retrieved sentence, so the model can tell the streams apart.
         path: JSON file mapping timestamp keys to a dict of field name to sentence. A path inside
-            a zip archive is written as `archive.zip/member/path.json`.
-        per_entity: Whether `path` contains an `{entity}` placeholder to fill in per series.
+            a zip archive is written as `archive.zip/member/path.json`. A `*` makes it a glob whose
+            matches are merged, for streams sharded by year.
+        per_entity: Whether `path` contains an `{entity}` or `{location}` placeholder to fill in
+            per series. `{location}` resolves through the dataset config's entity_locations, for
+            sub-datasets whose text is keyed by weather station rather than by series.
     """
 
     name: str
@@ -74,6 +77,13 @@ class FidelTsDataset(MultimodalDatasetBase):
             is formed, so no window straddles a split boundary.
         train_ratio: Fraction of the series given to 'train'.
         val_ratio: Fraction given to 'val'; 'test' takes the remainder.
+        time_series_dir: Subdirectory holding the parquet files.
+        location: Value substituted for `{location}` in a text source path.
+        std_floor_ratio: Lower bound on a window's standard deviation, as a fraction of the whole
+            series'. Windows can be nearly flat — a room held at setpoint, a solar plant overnight
+            — and dividing by their own standard deviation then multiplies the horizon by a
+            hundred or more, which lands in the reported error as a handful of samples worth
+            thousands. The floor keeps such windows on the series' own scale.
 
     Raises:
         FileNotFoundError: If data_dir or the entity's time series file does not exist.
@@ -96,6 +106,9 @@ class FidelTsDataset(MultimodalDatasetBase):
         split: Split = "all",
         train_ratio: float = 0.7,
         val_ratio: float = 0.1,
+        time_series_dir: str = "time_series",
+        location: str | None = None,
+        std_floor_ratio: float = 0.1,
     ) -> None:
         self.data_dir = Path(data_dir)
         self.entity = entity
@@ -109,6 +122,9 @@ class FidelTsDataset(MultimodalDatasetBase):
         self.split = split
         self.train_ratio = train_ratio
         self.val_ratio = val_ratio
+        self.time_series_dir = time_series_dir
+        self.location = location
+        self.std_floor_ratio = std_floor_ratio
         self.data: list[RawSample] = []
 
         self._validate()
@@ -152,19 +168,21 @@ class FidelTsDataset(MultimodalDatasetBase):
 
     @property
     def _time_series_path(self) -> Path:
-        return self.data_dir / "time_series" / f"{self.entity}.parquet"
+        return self.data_dir / self.time_series_dir / f"{self.entity}.parquet"
 
     @staticmethod
-    def list_entities(data_dir: Path) -> list[str]:
+    def list_entities(data_dir: Path, time_series_dir: str = "time_series") -> list[str]:
         """Return the entity ids that have a time series file, sorted.
 
         Args:
             data_dir: Root of one downloaded sub-dataset.
+            time_series_dir: Subdirectory holding the parquet files. Sub-datasets disagree:
+                Bear_room ships `time_series`, Germany_Renewable_Energy_Grid `impute_data`.
 
         Returns:
             Entity ids taken from the parquet filenames.
         """
-        return sorted(p.stem for p in (Path(data_dir) / "time_series").glob("*.parquet"))
+        return sorted(p.stem for p in (Path(data_dir) / time_series_dir).glob("*.parquet"))
 
     def _read_report(self, path: str) -> dict[str, dict[str, str]]:
         """Read one timestamped report, from a plain file or from inside a zip archive.
@@ -184,6 +202,17 @@ class FidelTsDataset(MultimodalDatasetBase):
         parts = Path(path).parts
         zip_index = next((i for i, part in enumerate(parts) if part.endswith(".zip")), None)
         if zip_index is None:
+            if "*" in path:
+                # Sharded by year, and the shards are disjoint in time, so merging is a plain update.
+                matches = sorted(self.data_dir.glob(path))
+                if not matches:
+                    raise FileNotFoundError(f"Text source matched nothing: {self.data_dir / path}")
+                merged: dict[str, dict[str, str]] = {}
+                for match in matches:
+                    with open(match) as f:
+                        merged.update(json.load(f))
+                return merged
+
             full_path = self.data_dir / path
             if not full_path.exists():
                 raise FileNotFoundError(f"Text source not found: {full_path}")
@@ -209,8 +238,19 @@ class FidelTsDataset(MultimodalDatasetBase):
 
         Returns:
             Tuple of (sorted timestamps as integer nanoseconds, rendered text per timestamp).
+
+        Raises:
+            ValueError: If the path asks for a location the dataset config did not map.
         """
-        path = source.path.format(entity=self.entity) if source.per_entity else source.path
+        if source.per_entity:
+            if "{location}" in source.path and self.location is None:
+                raise ValueError(
+                    f"Text source {source.name!r} needs a location for entity {self.entity!r}; "
+                    "add it to entity_locations in the dataset config."
+                )
+            path = source.path.format(entity=self.entity, location=self.location)
+        else:
+            path = source.path
         report = self._read_report(path)
 
         keys = pd.to_datetime(list(report), format=_REPORT_KEY_FORMAT)
@@ -249,21 +289,21 @@ class FidelTsDataset(MultimodalDatasetBase):
         return patches
 
     def _normalize_sample(
-        self, context: npt.NDArray[np.float64], horizon: npt.NDArray[np.float64]
+        self, context: npt.NDArray[np.float64], horizon: npt.NDArray[np.float64], std_floor: float
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], float, float]:
         """Z-score both windows using the context statistics, as the Time-MMD loader does.
 
         Args:
             context: Context values of shape (context_len,).
             horizon: Horizon values of shape (horizon_len,).
+            std_floor: Lower bound on the divisor, keeping a near-flat window on the series' scale
+                rather than amplifying its horizon by however many times its own spread fits in it.
 
         Returns:
             Tuple of (normalized context, normalized horizon, context mean, context std).
         """
         context_mean = float(np.mean(context))
-        context_std = float(np.std(context))
-        if context_std < 1e-6:
-            context_std = 1.0
+        context_std = max(float(np.std(context)), std_floor)
         return (context - context_mean) / context_std, (horizon - context_mean) / context_std, context_mean, context_std
 
     def _load_data(self) -> None:
@@ -281,10 +321,16 @@ class FidelTsDataset(MultimodalDatasetBase):
             if column not in frame.columns:
                 raise ValueError(f"Column {column!r} not in {self._time_series_path} (has {list(frame.columns)})")
 
+        # utc=True because a local-time column crosses daylight saving twice a year, and mixed
+        # offsets otherwise parse to an object column that cannot be compared against the reports.
         times: npt.NDArray[np.int64] = np.asarray(
-            pd.to_datetime(frame[self.timestamp_column]).to_numpy(), dtype="datetime64[ns]"
+            pd.to_datetime(frame[self.timestamp_column], utc=True).dt.tz_localize(None).to_numpy(),
+            dtype="datetime64[ns]",
         ).astype(np.int64)
         values = frame[self.target_column].to_numpy(dtype=np.float64)
+        # Floored against the whole series rather than the split, so the scale does not depend on
+        # which split a window landed in.
+        std_floor = self.std_floor_ratio * float(np.std(values))
 
         split_start, split_end = self._split_bounds(len(values))
         times, values = times[split_start:split_end], values[split_start:split_end]
@@ -306,7 +352,7 @@ class FidelTsDataset(MultimodalDatasetBase):
             for start in range(shift, len(values) - window + 1, self.horizon_len):
                 context_end = start + self.context_len
                 context, horizon = values[start:context_end], values[context_end : context_end + self.horizon_len]
-                context_normalized, horizon_normalized, mean, std = self._normalize_sample(context, horizon)
+                context_normalized, horizon_normalized, mean, std = self._normalize_sample(context, horizon, std_floor)
 
                 patch_end_indices = np.arange(start + self.patch_len - 1, context_end, self.patch_len)
                 self.data.append(
