@@ -19,6 +19,10 @@ what the number means:
   shape of the curve separates the two, which a single score cannot.
 - Every fit is repeated on deranged features, which carry the same marginals and no per-sample
   correspondence. That null is the floor to read the score against.
+- A text embedding is partly a timestamp — weather bulletins turn with the season, control
+  statements with the schedule — and the residual has its own daily and seasonal structure, so the
+  two correlate through time alone. Three nested models separate that: time features by
+  themselves, text by itself, and both. What the text is worth is `both` minus `time`.
 
 Fitting an intercept on standardized features absorbs the direction shared by every embedding, so
 none of this is affected by the anisotropy that dominates these embeddings.
@@ -101,8 +105,8 @@ def _parse_args() -> argparse.Namespace:
 
 def _collect(
     model: MultimodalDecoder, dataset: Any, batch_size: int, device: torch.device
-) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-    """Run the unimodal forecast and pair each residual with its text embeddings.
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Run the unimodal forecast and pair each residual with its text and its timestamp.
 
     Args:
         model: Decoder whose fusion head is bypassed by withholding text.
@@ -111,10 +115,10 @@ def _collect(
         device: Device to run on.
 
     Returns:
-        Tuple of (features, residuals). Features are the sample's text embeddings flattened over
-        patches, of shape (num_samples, num_patches * text_dims). Residuals are the horizon minus
-        the unimodal forecast, of shape (num_samples, horizon_len). Rows stay in time order, which
-        the block folds rely on.
+        Tuple of (features, residuals, time_features). Features are the sample's text embeddings
+        flattened over patches, of shape (num_samples, num_patches * text_dims). Residuals are the
+        horizon minus the unimodal forecast, of shape (num_samples, horizon_len). Rows stay in time
+        order, which the block folds rely on.
 
     Raises:
         ValueError: If the split carries no text embeddings.
@@ -123,6 +127,7 @@ def _collect(
 
     features: list[npt.NDArray[np.float64]] = []
     residuals: list[npt.NDArray[np.float64]] = []
+    prediction_times: list[str] = []
     with torch.no_grad():
         for batch in dataloader:
             if "text_embeddings" not in batch:
@@ -135,26 +140,84 @@ def _collect(
             residuals.append((horizon - forecast).cpu().numpy().astype(np.float64))
             embeddings = batch["text_embeddings"]
             features.append(embeddings.reshape(embeddings.shape[0], -1).cpu().numpy().astype(np.float64))
+            prediction_times.extend(str(m["prediction_time"]) for m in batch["metadata"] if "prediction_time" in m)
 
-    return np.concatenate(features), np.concatenate(residuals)
+    stacked = np.concatenate(features)
+    return stacked, np.concatenate(residuals), _time_features(prediction_times, len(stacked))
 
 
-def _pipeline(n_components: int, alphas: list[float]) -> Any:
-    """Build the standardize, reduce, ridge pipeline scored throughout."""
+def _time_features(prediction_times: list[str], num_samples: int) -> npt.NDArray[np.float64]:
+    """Build the clock a text stream could be standing in for.
+
+    Weather bulletins turn with the season and control statements with the schedule, so a text
+    embedding is partly a timestamp. Scoring these features on their own says how much of the
+    text's apparent predictive power is that and nothing more.
+
+    Args:
+        prediction_times: Parseable timestamps, one per sample, or empty when the dataset carries
+            none — Time-MMD samples do not, and then only the trend terms are available.
+        num_samples: Number of samples, used when timestamps are absent.
+
+    Returns:
+        Features of shape (num_samples, num_time_features).
+    """
+    position = np.linspace(0.0, 1.0, num_samples)
+    columns = [position, position**2]
+
+    if len(prediction_times) == num_samples:
+        seconds = np.asarray(np.array(prediction_times, dtype="datetime64[s]"), dtype=np.float64)
+        for period in (86400.0, 604800.0, 31557600.0):  # day, week, year
+            columns += [np.sin(2 * np.pi * seconds / period), np.cos(2 * np.pi * seconds / period)]
+    else:
+        _logger.warning("No per-sample timestamps; the time control covers trend only.")
+
+    return np.column_stack(columns)
+
+
+def _pipeline(kind: str, n_components: int, alphas: list[float], num_text: int) -> Any:
+    """Build the pipeline for one of the three nested models.
+
+    Features arrive as the text columns followed by the time columns, and `kind` selects which of
+    them reach the ridge: 'text', 'time', or 'both'. Comparing 'both' against 'time' is what
+    isolates the text's contribution, and doing it by nesting rather than by residualizing keeps
+    every fit inside its own fold.
+
+    Args:
+        kind: Which columns to use.
+        n_components: PCA dimension applied to the text columns.
+        alphas: Ridge penalties to search.
+        num_text: Number of leading text columns.
+
+    Returns:
+        An unfitted pipeline.
+    """
+    from sklearn.compose import ColumnTransformer
     from sklearn.decomposition import PCA
     from sklearn.linear_model import RidgeCV
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
 
-    return make_pipeline(StandardScaler(), PCA(n_components=n_components), RidgeCV(alphas=alphas))
+    text_block = ("text", make_pipeline(StandardScaler(), PCA(n_components=n_components)), slice(0, num_text))
+    time_block = ("time", StandardScaler(), slice(num_text, None))
+    match kind:
+        case "text":
+            blocks = [text_block]
+        case "time":
+            blocks = [time_block]
+        case _:
+            blocks = [text_block, time_block]
+
+    return make_pipeline(ColumnTransformer(blocks), RidgeCV(alphas=alphas))
 
 
 def _cross_validate(
     features: npt.NDArray[np.float64],
     targets: npt.NDArray[np.float64],
+    kind: str,
     n_components: int,
     alphas: list[float],
     n_folds: int,
+    num_text: int,
 ) -> tuple[float, float, float]:
     """Score the pipeline over contiguous blocks of a time-ordered split.
 
@@ -162,11 +225,13 @@ def _cross_validate(
     hold out a window whose neighbour is still being trained on.
 
     Args:
-        features: Features in time order.
+        features: Text columns followed by time columns, in time order.
         targets: Targets in time order, of shape (num_samples,) or (num_samples, num_outputs).
-        n_components: PCA dimension.
+        kind: Which columns the model may use — 'text', 'time' or 'both'.
+        n_components: PCA dimension applied to the text columns.
         alphas: Ridge penalties searched inside each fold.
         n_folds: Number of contiguous blocks.
+        num_text: Number of leading text columns.
 
     Returns:
         Tuple of (r2, correlation, mean ridge penalty). The correlation is between the pooled
@@ -181,7 +246,7 @@ def _cross_validate(
     penalties: list[float] = []
 
     for train_index, val_index in KFold(n_splits=n_folds, shuffle=False).split(features):
-        pipeline = _pipeline(n_components, alphas)
+        pipeline = _pipeline(kind, n_components, alphas, num_text)
         pipeline.fit(features[train_index], targets_2d[train_index])
         predictions[val_index] = pipeline.predict(features[val_index]).reshape(len(val_index), -1)
         penalties.append(float(np.mean(np.atleast_1d(pipeline[-1].alpha_))))
@@ -205,11 +270,12 @@ def _transfer(
     test_targets: npt.NDArray[np.float64],
     n_components: int,
     alphas: list[float],
+    num_text: int,
 ) -> float:
     """Fit on the whole training split and score on test, answering whether the fit transfers."""
     from sklearn.metrics import r2_score
 
-    pipeline = _pipeline(n_components, alphas)
+    pipeline = _pipeline("text", n_components, alphas, num_text)
     pipeline.fit(train_features, train_targets.reshape(len(train_targets), -1))
     predictions = pipeline.predict(test_features).reshape(len(test_features), -1)
     return float(r2_score(test_targets.reshape(len(test_targets), -1), predictions, multioutput="uniform_average"))
@@ -234,26 +300,42 @@ def _probe_domain(
     Returns:
         Per-dimension scores plus the split sizes and residual scale.
     """
-    train_features, train_residuals = _collect(model, train_dataset, args.batch_size, device)
-    test_features, test_residuals = _collect(model, test_dataset, args.batch_size, device)
+    train_text, train_residuals, train_time = _collect(model, train_dataset, args.batch_size, device)
+    test_text, test_residuals, test_time = _collect(model, test_dataset, args.batch_size, device)
 
-    shuffled = train_features[derangement(len(train_features), args.seed)]
+    num_text = train_text.shape[1]
+    train_features = np.hstack([train_text, train_time])
+    test_features = np.hstack([test_text, test_time])
+    # Deranging the text columns alone leaves the clock aligned, so the null says what a model
+    # already holding the timestamp gains from text that belongs to another sample.
+    shuffled = np.hstack([train_text[derangement(len(train_text), args.seed)], train_time])
     train_mean = train_residuals.mean(axis=1)
     test_mean = test_residuals.mean(axis=1)
 
     # PCA cannot ask for more components than the smallest fold provides.
     fold_size = len(train_features) - len(train_features) // args.cv_folds
-    limit = min(train_features.shape[1], fold_size - 1)
+    limit = min(num_text, fold_size - 1)
     dimensions = sorted(
         {min(k, limit) for k in args.pca_components if k <= limit} | {min(args.pca_components[0], limit)}
     )
 
+    # Independent of the text dimension, so scored once.
+    r2_time, corr_time, _ = _cross_validate(train_features, train_mean, "time", 1, args.alphas, args.cv_folds, num_text)
+
     curve: list[dict[str, float]] = []
     for k in dimensions:
-        r2_mean, corr_mean, alpha = _cross_validate(train_features, train_mean, k, args.alphas, args.cv_folds)
-        r2_mean_null, _, _ = _cross_validate(shuffled, train_mean, k, args.alphas, args.cv_folds)
-        r2_horizon, _, _ = _cross_validate(train_features, train_residuals, k, args.alphas, args.cv_folds)
-        r2_horizon_null, _, _ = _cross_validate(shuffled, train_residuals, k, args.alphas, args.cv_folds)
+
+        def cv(
+            features: npt.NDArray[np.float64], targets: npt.NDArray[np.float64], kind: str, k: int = k
+        ) -> tuple[float, float, float]:
+            return _cross_validate(features, targets, kind, k, args.alphas, args.cv_folds, num_text)
+
+        r2_mean, corr_mean, alpha = cv(train_features, train_mean, "text")
+        r2_mean_null, _, _ = cv(shuffled, train_mean, "text")
+        r2_horizon, _, _ = cv(train_features, train_residuals, "text")
+        r2_horizon_null, _, _ = cv(shuffled, train_residuals, "text")
+        r2_both, _, _ = cv(train_features, train_mean, "both")
+        r2_both_null, _, _ = cv(shuffled, train_mean, "both")
         curve.append(
             {
                 "n_components": float(k),
@@ -262,17 +344,25 @@ def _probe_domain(
                 "cv_corr_mean": corr_mean,
                 "cv_r2_horizon": r2_horizon,
                 "cv_r2_horizon_null": r2_horizon_null,
+                "cv_r2_both": r2_both,
+                "cv_r2_text_increment": r2_both - r2_time,
+                "cv_r2_text_increment_null": r2_both_null - r2_time,
                 "ridge_alpha": alpha,
-                "transfer_r2_mean": _transfer(train_features, train_mean, test_features, test_mean, k, args.alphas),
+                "transfer_r2_mean": _transfer(
+                    train_features, train_mean, test_features, test_mean, k, args.alphas, num_text
+                ),
             }
         )
 
     return {
         "curve": curve,
+        "cv_r2_time": r2_time,
+        "cv_corr_time": corr_time,
         "residual_rms": float(np.sqrt(np.mean(test_residuals**2))),
         "num_train": float(len(train_features)),
         "num_test": float(len(test_features)),
-        "num_features": float(train_features.shape[1]),
+        "num_text_features": float(num_text),
+        "num_time_features": float(train_time.shape[1]),
     }
 
 
@@ -317,13 +407,17 @@ def main() -> int:
             continue
 
         results[domain] = _probe_domain(model, splits["train"], splits["test"], args, device)
-        best = max(results[domain]["curve"], key=lambda row: row["cv_r2_mean"])
+        best = max(results[domain]["curve"], key=lambda row: row["cv_r2_text_increment"])
         _logger.info(
-            "%s: best cv_r2_mean=%.4f (null %.4f, corr %.3f) at %d components, transfer %.4f",
+            "%s: time alone %.4f | text %.4f (null %.4f, corr %.3f) | text over time %.4f "
+            "(null %.4f) at %d components, transfer %.4f",
             domain,
+            results[domain]["cv_r2_time"],
             best["cv_r2_mean"],
             best["cv_r2_mean_null"],
             best["cv_corr_mean"],
+            best["cv_r2_text_increment"],
+            best["cv_r2_text_increment_null"],
             int(best["n_components"]),
             best["transfer_r2_mean"],
         )
