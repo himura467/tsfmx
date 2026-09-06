@@ -16,6 +16,7 @@ from examples.time_mmd.configs.model import ModelConfig
 from tsfmx.data.splits import DomainSpec, load_fold_datasets
 from tsfmx.data.collate import multimodal_collate_fn
 from tsfmx.data.loader import build_dataloader
+from tsfmx.data.statistics import text_embedding_mean
 from tsfmx.evaluator import MultimodalEvaluator
 from tsfmx.trainer import MultimodalTrainer
 from tsfmx.training_args import TrainingArguments
@@ -76,6 +77,12 @@ def _parse_args() -> argparse.Namespace:
         "--keep-best-test-mae",
         action="store_true",
         help="Retain the cross-trial checkpoint with the lowest test MAE as best_test_mae.pt.",
+    )
+    parser.add_argument(
+        "--center-text",
+        action="store_true",
+        help="Subtract the training-split mean text embedding before projecting. The mean is saved "
+        "with the checkpoint, so evaluation applies it without needing the flag.",
     )
     parser.add_argument("--seed", type=int, help="Random seed for reproducibility.")
 
@@ -147,6 +154,7 @@ def _train_and_evaluate(
     keep_best_val_loss: bool,
     keep_best_test_mse: bool,
     keep_best_test_mae: bool,
+    center_text: bool,
 ) -> None:
     """Run one sweep trial: train the fusion head and log metrics to W&B.
 
@@ -210,6 +218,12 @@ def _train_and_evaluate(
     )
 
     model = build_decoder(model_config, device, num_fusion_layers, fusion_hidden_dims)
+
+    if center_text:
+        # Computed on the training split alone, so validation and test stay out of the statistic.
+        text_mean = text_embedding_mean(train_dataset)
+        _logger.info("Centering text embeddings on the training-split mean (norm %.4f)", text_mean.norm().item())
+        model.fusion.set_text_mean(text_mean)
 
     trainer = MultimodalTrainer(
         model=model,
@@ -347,6 +361,7 @@ def main() -> int:
                 keep_best_val_loss=args.keep_best_val_loss,
                 keep_best_test_mse=args.keep_best_test_mse,
                 keep_best_test_mae=args.keep_best_test_mae,
+                center_text=args.center_text,
             )
 
     if args.sweep_id:
