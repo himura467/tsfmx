@@ -1,0 +1,43 @@
+method: bayes
+
+# Selecting on test/mse would tune the hyperparameters on the split the reported numbers come from.
+metric:
+  name: val/best_loss
+  goal: minimize
+
+# A single bias-free Linear, so with --center-text the projection output is exactly zero-mean
+# across samples. Hidden ReLUs rectify, and a constant component regrows through them, which
+# leaves the deeper configurations unable to say whether centering worked.
+parameters:
+  num_fusion_layers:
+    value: 1
+
+  batch_size:
+    values: [2, 4, 8, 16, 32, 64, 128]
+
+  num_epochs:
+    values: [5, 10, 15, 20, 25, 30]
+
+  learning_rate:
+    distribution: log_uniform_values
+    min: 1e-8
+    max: 1e-4
+
+  lr_scheduler_type:
+    values: ["linear", "cosine"]
+
+  warmup_steps:
+    distribution: uniform
+    min: 0.0
+    max: 0.1
+
+  weight_decay:
+    distribution: log_uniform_values
+    min: 1e-4
+    max: 1e-1
+
+  gradient_accumulation_steps:
+    values: [1, 2, 4, 8]
+
+  text_dropout_prob:
+    values: [0.0, 0.1, 0.25, 0.5]

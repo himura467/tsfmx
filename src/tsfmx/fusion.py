@@ -16,6 +16,8 @@ class MultimodalFusion(nn.Module):
     It defaults to off, so the module is unchanged unless asked.
     """
 
+    text_mean: torch.Tensor
+
     def __init__(
         self,
         ts_embedding_dims: int,
@@ -48,6 +50,12 @@ class MultimodalFusion(nn.Module):
         # what fusion adds, and callers cannot read a partial transform.
         self.projection = nn.Sequential(*layers)
 
+        # Sentence embeddings are strongly anisotropic: measured on Fidel-TS, 97% of the magnitude
+        # of an all-MiniLM-L6-v2 embedding lies in a direction shared by every sample, which a
+        # bias-free projection can only pass on as a constant offset. Subtracting it leaves the
+        # part that varies. Zeros until set_text_mean is called, so centering is off by default.
+        self.register_buffer("text_mean", torch.zeros(text_embedding_dims))
+
         for module in self.projection.modules():
             if isinstance(module, nn.Linear):
                 nn.init.xavier_uniform_(module.weight)
@@ -60,10 +68,30 @@ class MultimodalFusion(nn.Module):
                 f"hidden_dims must have {num_layers - 1} elements for {num_layers} layers, got {len(hidden_dims)}"
             )
 
+    def set_text_mean(self, mean: torch.Tensor) -> None:
+        """Center the projection's input on `mean`, which then travels with the checkpoint.
+
+        Compute it on the training split alone, and as one mean across entities rather than one
+        each: a per-entity mean would subtract exactly the between-entity component that the
+        cross_domain ablation exists to measure.
+
+        Note that centering makes the `mean` ablation nearly equivalent to `drop`, since the
+        replacement embedding then projects to approximately zero.
+
+        Args:
+            mean: Mean text embedding, of shape (text_embedding_dims,).
+
+        Raises:
+            ValueError: If mean does not match the configured text embedding dimension.
+        """
+        if mean.shape != self.text_mean.shape:
+            raise ValueError(f"mean must have shape {tuple(self.text_mean.shape)}, got {tuple(mean.shape)}")
+        self.text_mean.copy_(mean.to(device=self.text_mean.device, dtype=self.text_mean.dtype))
+
     @override
     def forward(self, ts_embeddings: torch.Tensor, text_embeddings: torch.Tensor) -> torch.Tensor:
         """Project text_embeddings to ts_embedding_dims and add to ts_embeddings."""
-        projected: torch.Tensor = self.projection(text_embeddings)
+        projected: torch.Tensor = self.projection(text_embeddings - self.text_mean)
         return ts_embeddings + projected
 
     def freeze_parameters(self) -> None:

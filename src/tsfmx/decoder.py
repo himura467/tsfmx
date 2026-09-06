@@ -133,7 +133,12 @@ class MultimodalDecoder(nn.Module):
             if saved_config != self.config:
                 _logger.info("Rebuilding fusion to match %s: %s (constructed as %s)", path, saved_config, self.config)
                 self._rebuild_fusion(saved_config)
-            self.fusion.load_state_dict(checkpoint["fusion_state_dict"])
+            fusion_state: dict[str, Any] = checkpoint["fusion_state_dict"]
+            if "text_mean" not in fusion_state:
+                # Predates centering, so it was trained on uncentered embeddings: zero leaves the
+                # projection's input unchanged.
+                fusion_state = {**fusion_state, "text_mean": torch.zeros_like(self.fusion.text_mean)}
+            self.fusion.load_state_dict(fusion_state)
         if has_adapter:
             self.adapter.load_state_dict(checkpoint["adapter_state_dict"])
 
