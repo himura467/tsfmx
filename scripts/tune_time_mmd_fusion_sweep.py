@@ -78,11 +78,18 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Retain the cross-trial checkpoint with the lowest test MAE as best_test_mae.pt.",
     )
-    parser.add_argument(
+    text_input = parser.add_mutually_exclusive_group()
+    text_input.add_argument(
         "--center-text",
         action="store_true",
         help="Subtract the training-split mean text embedding before projecting. The mean is saved "
         "with the checkpoint, so evaluation applies it without needing the flag.",
+    )
+    text_input.add_argument(
+        "--constant-text",
+        action="store_true",
+        help="Control run: feed the training-split mean text embedding in place of every sample's text, "
+        "so fusion can only learn an input-independent offset. Saved with the checkpoint like --center-text.",
     )
     parser.add_argument("--seed", type=int, help="Random seed for reproducibility.")
 
@@ -155,6 +162,7 @@ def _train_and_evaluate(
     keep_best_test_mse: bool,
     keep_best_test_mae: bool,
     center_text: bool,
+    constant_text: bool,
 ) -> None:
     """Run one sweep trial: train the fusion head and log metrics to W&B.
 
@@ -180,6 +188,8 @@ def _train_and_evaluate(
         keep_best_val_loss: Whether to retain the cross-trial best val_loss checkpoint.
         keep_best_test_mse: Whether to retain the cross-trial best test_mse checkpoint.
         keep_best_test_mae: Whether to retain the cross-trial best test_mae checkpoint.
+        center_text: Whether to center text embeddings on the training-split mean.
+        constant_text: Whether to replace every sample's text with the training-split mean.
     """
     config = run.config
     _logger.info("Starting sweep run %s with config: %s", run.id, dict(config))
@@ -224,6 +234,10 @@ def _train_and_evaluate(
         text_mean = text_embedding_mean(train_dataset)
         _logger.info("Centering text embeddings on the training-split mean (norm %.4f)", text_mean.norm().item())
         model.fusion.set_text_mean(text_mean)
+    elif constant_text:
+        text_mean = text_embedding_mean(train_dataset)
+        _logger.info("Replacing text with the training-split mean embedding (norm %.4f)", text_mean.norm().item())
+        model.fusion.set_constant_text(text_mean)
 
     trainer = MultimodalTrainer(
         model=model,
@@ -362,6 +376,7 @@ def main() -> int:
                 keep_best_test_mse=args.keep_best_test_mse,
                 keep_best_test_mae=args.keep_best_test_mae,
                 center_text=args.center_text,
+                constant_text=args.constant_text,
             )
 
     if args.sweep_id:
