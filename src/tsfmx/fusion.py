@@ -17,6 +17,7 @@ class MultimodalFusion(nn.Module):
     """
 
     text_mean: torch.Tensor
+    constant_text: torch.Tensor
 
     def __init__(
         self,
@@ -55,6 +56,10 @@ class MultimodalFusion(nn.Module):
         # bias-free projection can only pass on as a constant offset. Subtracting it leaves the
         # part that varies. Zeros until set_text_mean is called, so centering is off by default.
         self.register_buffer("text_mean", torch.zeros(text_embedding_dims))
+        # When set, the projection sees text_mean in place of every sample's text instead of having
+        # it subtracted, so fusion can learn only what a constant input allows. A buffer rather than
+        # an attribute so that evaluation scripts inherit the control from the checkpoint.
+        self.register_buffer("constant_text", torch.tensor(False))
 
         for module in self.projection.modules():
             if isinstance(module, nn.Linear):
@@ -88,10 +93,37 @@ class MultimodalFusion(nn.Module):
             raise ValueError(f"mean must have shape {tuple(self.text_mean.shape)}, got {tuple(mean.shape)}")
         self.text_mean.copy_(mean.to(device=self.text_mean.device, dtype=self.text_mean.dtype))
 
+    def set_constant_text(self, mean: torch.Tensor) -> None:
+        """Replace every sample's text with `mean` before projecting, as a control for reading it.
+
+        A fusion head can beat the text-free forecast without reading anything, by learning an
+        input-independent offset. Training on a constant input leaves it only that route, so the
+        gap between this control and a head trained on the real text is what the text's content
+        adds. With a single bias-free Linear the projection of `mean` can reach any vector, which
+        makes the control equivalent to a learned bias of the same optimizer and search space.
+
+        Samples whose text is withheld (all-zero embeddings, as training-time text dropout
+        produces) stay zero, so dropout still skips fusion for them. Mutually exclusive with
+        centering, which would reduce the constant to zero.
+
+        Args:
+            mean: Mean text embedding of the training split, of shape (text_embedding_dims,).
+
+        Raises:
+            ValueError: If mean does not match the configured text embedding dimension.
+        """
+        self.set_text_mean(mean)
+        self.constant_text.fill_(True)
+
     @override
     def forward(self, ts_embeddings: torch.Tensor, text_embeddings: torch.Tensor) -> torch.Tensor:
         """Project text_embeddings to ts_embedding_dims and add to ts_embeddings."""
-        projected: torch.Tensor = self.projection(text_embeddings - self.text_mean)
+        if self.constant_text:
+            present = text_embeddings.ne(0).any(dim=-1, keepdim=True).to(text_embeddings.dtype)
+            inputs = present * self.text_mean
+        else:
+            inputs = text_embeddings - self.text_mean
+        projected: torch.Tensor = self.projection(inputs)
         return ts_embeddings + projected
 
     def freeze_parameters(self) -> None:

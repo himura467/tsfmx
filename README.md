@@ -312,6 +312,25 @@ Three readings follow from that:
 
 The diagnostics then say how far the input side actually moved: `text_mean_pairwise_cosine` against Time-MMD's 0.73-0.90 measures whether the encoder now separates samples at all.
 
+### Separating the text's content from a learned offset
+
+Even when `shuffle` degrades, most of a fusion head's gain can survive `mean`: an input-independent offset, which needs no text, may be doing the work. A head *trained* on a constant input settles that, because an offset is then the only thing it can learn. `--constant-text` on the fusion sweep feeds the training-split mean embedding in place of every sample's text; like `--center-text`, it is saved with the checkpoint, so evaluation applies it without the flag. The two are mutually exclusive.
+
+[run_germany_wind_text_controls.sh](scripts/run_germany_wind_text_controls.sh) runs four conditions on the four `Germany_Renewable_Energy_Grid` wind series with one seed and one sweep budget, then writes test metrics and ablations under `outputs/germany_wind_text_controls/<condition>/`:
+
+| Condition | Trains | What it isolates |
+| --- | --- | --- |
+| `adapter` | Adapter, no text | The unimodal baseline |
+| `text` | Fusion head on the real text | The full gain |
+| `constant` | Fusion head with `--constant-text` | What an offset alone achieves |
+| `centered` | Fusion head with `--center-text` | Whether the gain survives with no offset coming from the text |
+
+```sh
+WANDB_API_KEY=... ./scripts/run_germany_wind_text_controls.sh 30
+```
+
+`text` minus `constant` is what the content adds. The three fusion conditions share `fusion_1layer.yml`, since centering removes the offset exactly only through a single bias-free Linear; override with `FUSION_SWEEP`, and select conditions with `CONDITIONS="constant centered"`. The sweeps run sequentially because trials of the same mode share `outputs/sweeps/<mode>/checkpoints`.
+
 ## Benchmark Comparison with MM-TSFlib
 
 [MM-TSFlib](https://github.com/AdityaLab/MM-TSFlib) is cloned under `third_party/MM-TSFlib` (not tracked by git). MM-TSFlib is run on its own pre-processed Time-MMD CSVs; tsfmx is evaluated on the raw Time-MMD data split 70/10/20. Both cover the same underlying domains and split ratio.

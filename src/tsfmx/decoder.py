@@ -138,6 +138,9 @@ class MultimodalDecoder(nn.Module):
                 # Predates centering, so it was trained on uncentered embeddings: zero leaves the
                 # projection's input unchanged.
                 fusion_state = {**fusion_state, "text_mean": torch.zeros_like(self.fusion.text_mean)}
+            if "constant_text" not in fusion_state:
+                # Predates the constant-text control, so it was trained on the real text.
+                fusion_state = {**fusion_state, "constant_text": torch.tensor(False)}
             self.fusion.load_state_dict(fusion_state)
         if has_adapter:
             self.adapter.load_state_dict(checkpoint["adapter_state_dict"])
