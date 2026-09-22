@@ -37,7 +37,7 @@ The four mounts are what makes a run repeatable rather than disposable:
 | `outputs` | Checkpoints, sweep results, ablation and diagnostics JSON | The experiment itself |
 | `~/.cache/huggingface` | Chronos-2, TimesFM and the sentence encoder | Re-downloading the pretrained weights on every container start |
 
-They are subdirectories rather than a single mount over `data/`, which would hide the Time-MMD clone baked into the image. `--gpus all` needs the NVIDIA Container Toolkit on the host. `-e WANDB_API_KEY` forwards the host variable, which the sweeps need in order to log; drop it if you are only running evaluation.
+They are subdirectories rather than a single mount over `data/`, which would hide the Time-MMD clone baked into the image. `--gpus all` needs the NVIDIA Container Toolkit on the host. `-e WANDB_API_KEY` forwards the host variable, which the sweeps need in order to log; drop it if you are only running evaluation. Set that variable with `read -rs WANDB_API_KEY && export WANDB_API_KEY` rather than assigning it inline, which would leave the key in the shell's history file.
 
 Time-MMD is ready inside the container, so the quick start below starts at step 2. Fidel-TS is not downloaded at build time — it lands in the mounted volume instead, so the sub-dataset choice is not baked into the image and the download survives a rebuild.
 
@@ -326,10 +326,32 @@ Even when `shuffle` degrades, most of a fusion head's gain can survive `mean`: a
 | `centered` | Fusion head with `--center-text` | Whether the gain survives with no offset coming from the text |
 
 ```sh
-WANDB_API_KEY=... ./scripts/run_germany_wind_text_controls.sh 30
+read -rs WANDB_API_KEY && export WANDB_API_KEY
+```
+
+```sh
+./scripts/run_germany_wind_text_controls.sh 30
 ```
 
 `text` minus `constant` is what the content adds. The three fusion conditions share `fusion_1layer.yml`, since centering removes the offset exactly only through a single bias-free Linear; override with `FUSION_SWEEP`, and select conditions with `CONDITIONS="constant centered"`. The sweeps run sequentially because trials of the same mode share `outputs/sweeps/<mode>/checkpoints`.
+
+### Repeating a comparison under several seeds
+
+One sweep per condition yields one checkpoint per condition, so a comparison between them mixes the difference being measured with two sources of noise: the seed that trained each checkpoint, and the luck of which configuration topped its sweep. [export_sweep_trial_config.py](scripts/export_sweep_trial_config.py) takes a finished sweep and writes one of its trials — ranked by the sweep's own metric — as a sweep config that fixes every parameter, so the trial can be re-trained as it was:
+
+```sh
+PYTHONPATH=. uv run python scripts/export_sweep_trial_config.py \
+    --sweep <entity>/adapter-chronos-time-mmd/<sweep_id> \
+    --output outputs/seed_repeat_configs/adapter.yml
+```
+
+`--rank 2` exports the runner-up instead; re-training it as well tells whether the ranking itself was stable. [run_germany_wind_seed_repeats.sh](scripts/run_germany_wind_seed_repeats.sh) trains every `<condition>.yml` in a directory once per seed on the four wind series — a name starting with `adapter` in adapter mode, one starting with `fusion` in fusion mode — evaluates each checkpoint on test, and skips seeds already evaluated, so an interrupted run resumes:
+
+```sh
+SEEDS="1 2 3 4 5" ./scripts/run_germany_wind_seed_repeats.sh outputs/seed_repeat_configs
+```
+
+It ends with [summarize_seed_repeats.py](scripts/summarize_seed_repeats.py), which reports test MSE as mean ± std over seeds and each condition's macro difference from `adapter` against its standard error. A difference within about two standard errors is one the seeds alone produce.
 
 ## Benchmark Comparison with MM-TSFlib
 
