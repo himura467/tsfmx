@@ -1,0 +1,51 @@
+method: bayes
+
+# Selecting on test/mse would tune the hyperparameters on the split the reported numbers come from.
+metric:
+  name: val/best_loss
+  goal: minimize
+
+# This stage starts from the checkpoint the fusion sweep selected, so num_fusion_layers has to be
+# the architecture that checkpoint was trained with — the decoder rebuilds fusion from the saved
+# shapes, but a mismatch here means the first trial trains a head it then throws away.
+parameters:
+  num_fusion_layers:
+    value: 1
+
+  batch_size:
+    values: [2, 4, 8, 16, 32, 64, 128]
+
+  num_epochs:
+    values: [5, 10, 15, 20, 25, 30]
+
+  # The adapter updates pretrained weights, where a large step undoes the pretraining, so its range
+  # is the one the adapter sweep uses. The fusion head is only being refined here, so its range is
+  # narrower than in the fusion stage.
+  adapter_learning_rate:
+    distribution: log_uniform_values
+    min: 1e-8
+    max: 1e-6
+
+  fusion_learning_rate:
+    distribution: log_uniform_values
+    min: 1e-8
+    max: 1e-5
+
+  lr_scheduler_type:
+    values: ["linear", "cosine"]
+
+  warmup_steps:
+    distribution: uniform
+    min: 0.0
+    max: 0.1
+
+  weight_decay:
+    distribution: log_uniform_values
+    min: 1e-4
+    max: 1e-1
+
+  gradient_accumulation_steps:
+    values: [1, 2, 4, 8]
+
+  text_dropout_prob:
+    values: [0.0, 0.1, 0.25, 0.5]
