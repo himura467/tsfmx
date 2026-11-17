@@ -18,12 +18,14 @@
 #   CONDITIONS     Subset to run, e.g. "constant centered" (default: all four).
 #   SEED           Seed shared by every sweep (default 42).
 #   FUSION_SWEEP   Fusion search space (default fusion_1layer.yml; centering is exact only for one layer).
+#   AUGMENT_TRAIN  1 trains on the augmented cache, patch_len times the plain one; 0 on the plain one (default 1).
 set -euo pipefail
 
 COUNT="${1:-30}"
 CONDITIONS="${CONDITIONS:-adapter text constant centered}"
 SEED="${SEED:-42}"
 FUSION_SWEEP="${FUSION_SWEEP:-examples/time_mmd/configs/sweeps/fusion_1layer.yml}"
+AUGMENT_TRAIN="${AUGMENT_TRAIN:-1}"
 ADAPTER_SWEEP="examples/time_mmd/configs/sweeps/adapter.yml"
 MODEL_CONFIG="examples/time_mmd/configs/models/chronos.yml"
 DATASET_CONFIG="examples/fidel_ts/configs/datasets/germany_renewable_energy_grid.yml"
@@ -36,8 +38,14 @@ export PYTHONPATH=.
 
 ./scripts/download_fidel_ts.sh Germany_Renewable_Energy_Grid
 
-# Sweeps train on the augmented cache and validate and test on the plain one, so both are needed.
-for augment in "" "--augment"; do
+# Sweeps validate and test on the plain cache, and train on the augmented one unless AUGMENT_TRAIN=0.
+augments=("")
+augment_args=(--augment)
+if [[ "$AUGMENT_TRAIN" == 1 ]]; then
+    augments+=("--augment")
+    augment_args+=(train)
+fi
+for augment in "${augments[@]}"; do
     uv run python scripts/cache_fidel_ts_datasets.py \
         --model-config "$MODEL_CONFIG" \
         --dataset-config "$DATASET_CONFIG" \
@@ -54,6 +62,7 @@ for condition in $CONDITIONS; do
         --entities "${ENTITIES[@]}"
         --count "$COUNT"
         --seed "$SEED"
+        "${augment_args[@]}"
         --keep-best-val-loss
         --best-checkpoint-dir "$checkpoint_dir"
     )
