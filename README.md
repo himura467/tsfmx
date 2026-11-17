@@ -333,7 +333,7 @@ read -rs WANDB_API_KEY && export WANDB_API_KEY
 ./scripts/run_germany_wind_text_controls.sh 30
 ```
 
-`text` minus `constant` is what the content adds. The three fusion conditions share `fusion_1layer.yml`, since centering removes the offset exactly only through a single bias-free Linear; override with `FUSION_SWEEP`, and select conditions with `CONDITIONS="constant centered"`. The sweeps run sequentially because trials of the same mode share `outputs/sweeps/<mode>/checkpoints`.
+`text` minus `constant` is what the content adds. The three fusion conditions share `fusion_1layer.yml`, since centering removes the offset exactly only through a single bias-free Linear; override with `FUSION_SWEEP`, and select conditions with `CONDITIONS="constant centered"`. `AUGMENT_TRAIN=0` trains on the plain cache, `patch_len` times smaller than the augmented one; since it changes every condition's training data, run all four under the same setting. The sweeps run sequentially because trials of the same mode share `outputs/sweeps/<mode>/checkpoints`.
 
 ### Repeating a comparison under several seeds
 
