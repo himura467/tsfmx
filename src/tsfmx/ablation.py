@@ -77,6 +77,13 @@ def derangement(size: int, seed: int) -> npt.NDArray[np.int64]:
     return perm.astype(np.int64)
 
 
+def _copy_text(source: PreprocessedSample, target: PreprocessedSample) -> None:
+    """Give target the text of source, in every form source carries it."""
+    target["text_embeddings"] = source["text_embeddings"]
+    if "text_tokens" in source:
+        target["text_tokens"] = source["text_tokens"]
+
+
 def _oracle_sentence(sample: PreprocessedSample) -> str:
     """Write out the sample's own horizon as a sentence.
 
@@ -225,6 +232,10 @@ class TextAblatedDataset(Dataset[PreprocessedSample]):
         probe = self.dataset[0]
         if "text_embeddings" not in probe:
             raise ValueError(f"Ablation {self.ablation!r} requires samples with 'text_embeddings'")
+        if "text_tokens" in probe and self.ablation not in ("shuffle", "cross_domain"):
+            # The other ablations rewrite pooled embeddings only, which cross-attention never reads,
+            # so its metrics would match 'none' and pass for robustness.
+            raise ValueError(f"Ablation {self.ablation!r} does not perturb 'text_tokens'")
 
         if self.ablation == "shuffle" and self._len < 2:
             raise ValueError("Ablation 'shuffle' requires at least 2 samples to pair text across")
@@ -364,7 +375,7 @@ class TextAblatedDataset(Dataset[PreprocessedSample]):
             return result
 
         if self._perm is not None:  # non-None exactly for the 'shuffle' ablation
-            result["text_embeddings"] = self.dataset[int(self._perm[index])]["text_embeddings"]
+            _copy_text(self.dataset[int(self._perm[index])], result)
             return result
 
         if self._oracle_embeddings is not None:  # non-None exactly for the oracle ablations
@@ -376,9 +387,11 @@ class TextAblatedDataset(Dataset[PreprocessedSample]):
             return result
 
         if self.ablation == "cross_domain" and self.donor is not None:  # _validate guarantees the donor
-            result["text_embeddings"] = self.donor[index % self._donor_len]["text_embeddings"]
+            _copy_text(self.donor[index % self._donor_len], result)
             return result
 
         if "text_embeddings" in sample:
             result["text_embeddings"] = self._ablate_embeddings(index, sample["text_embeddings"])
+        if "text_tokens" in sample:  # only under 'none', which _validate leaves as the sole option
+            result["text_tokens"] = sample["text_tokens"]
         return result

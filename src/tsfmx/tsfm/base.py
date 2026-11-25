@@ -27,6 +27,9 @@ class TsfmAdapter(nn.Module, ABC):
     """Base interface for time series foundation model adapters.
 
     Pipeline: preprocess -> [fusion injection point] -> decode -> postprocess
+
+    Adapters whose encoder appends positions for the forecast also expose their embeddings through
+    `forecast_embeddings`, a second injection point that `forward` accepts back once fused.
     """
 
     @property
@@ -54,12 +57,28 @@ class TsfmAdapter(nn.Module, ABC):
         masks: torch.Tensor,
     ) -> PreprocessResult: ...
 
+    def forecast_embeddings(self, input_embeddings: torch.Tensor) -> torch.Tensor:
+        """Return the embeddings the encoder appends for the forecast positions.
+
+        Args:
+            input_embeddings: Context embeddings (batch_size, num_patches, model_dims), whose batch
+                size, dtype and device the result follows.
+
+        Returns:
+            Forecast-position embeddings (batch_size, num_forecast_patches, model_dims).
+
+        Raises:
+            NotImplementedError: If the model forecasts from context positions alone.
+        """
+        raise NotImplementedError(f"{type(self).__name__} has no forecast positions to fuse text into")
+
     @override
     @abstractmethod
     def forward(
         self,
         input_embeddings: torch.Tensor,
         masks: torch.Tensor,
+        forecast_embeddings: torch.Tensor | None = None,
     ) -> torch.Tensor: ...
 
     @abstractmethod

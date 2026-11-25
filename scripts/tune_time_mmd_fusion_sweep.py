@@ -17,7 +17,9 @@ from tsfmx.data.splits import DomainSpec, load_fold_datasets
 from tsfmx.data.collate import multimodal_collate_fn
 from tsfmx.data.loader import build_dataloader
 from tsfmx.data.statistics import text_embedding_mean
+from tsfmx.decoder import MultimodalDecoderConfig
 from tsfmx.evaluator import MultimodalEvaluator
+from tsfmx.fusion import MultimodalFusion
 from tsfmx.trainer import MultimodalTrainer
 from tsfmx.training_args import TrainingArguments
 from tsfmx.types import FusionCheckpoint
@@ -195,6 +197,12 @@ def _train_and_evaluate(
     _logger.info("Starting sweep run %s with config: %s", run.id, dict(config))
 
     num_fusion_layers, fusion_hidden_dims = _parse_fusion_hparams(config)
+    fusion_type = config.get("fusion_type", "linear")
+    cross_attention = fusion_type == "cross_attention"
+    if cross_attention and (center_text or constant_text):
+        raise ValueError(
+            "--center-text and --constant-text control the linear head and do not apply to cross-attention"
+        )
 
     training_args = replace(
         base_training_args,
@@ -225,16 +233,25 @@ def _train_and_evaluate(
         horizon_len=forecast_config.horizon_len,
         cache_dir=cache_dir,
         mode="fusion",
+        text_tokens=cross_attention,
     )
 
-    model = build_decoder(model_config, device, num_fusion_layers, fusion_hidden_dims)
+    model = build_decoder(
+        model_config,
+        device,
+        num_fusion_layers,
+        fusion_hidden_dims,
+        fusion_type=fusion_type,
+        num_attention_heads=config.get("num_attention_heads", MultimodalDecoderConfig.num_attention_heads),
+        fusion_position=config.get("fusion_position", "context"),
+    )
 
-    if center_text:
+    if isinstance(model.fusion, MultimodalFusion) and center_text:
         # Computed on the training split alone, so validation and test stay out of the statistic.
         text_mean = text_embedding_mean(train_dataset)
         _logger.info("Centering text embeddings on the training-split mean (norm %.4f)", text_mean.norm().item())
         model.fusion.set_text_mean(text_mean)
-    elif constant_text:
+    elif isinstance(model.fusion, MultimodalFusion) and constant_text:
         text_mean = text_embedding_mean(train_dataset)
         _logger.info("Replacing text with the training-split mean embedding (norm %.4f)", text_mean.norm().item())
         model.fusion.set_constant_text(text_mean)

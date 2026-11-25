@@ -70,6 +70,7 @@ def main() -> int:
                 horizon_len=forecast_config.horizon_len,
                 cache_dir=Path(args.cache_dir),
                 mode=mode,
+                text_tokens=model.config.fusion_type == "cross_attention",
             )
         except Exception as e:
             _logger.warning("Skipping %s: %s", domain, e)

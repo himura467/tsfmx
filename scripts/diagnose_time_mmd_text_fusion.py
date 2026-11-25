@@ -19,6 +19,7 @@ from tsfmx.data.splits import DomainSpec, load_split_dataset
 from tsfmx.data.collate import multimodal_collate_fn
 from tsfmx.data.loader import build_dataloader
 from tsfmx.decoder import MultimodalDecoder
+from tsfmx.fusion import MultimodalFusion
 from tsfmx.types import Batch, TrainingMode
 from tsfmx.utils.device import resolve_device
 from tsfmx.utils.logging import setup_logger
@@ -153,6 +154,9 @@ def _diagnose_domain(
     Returns:
         Tuple of (metrics, retained text embeddings, retained projection outputs). The retained
         arrays hold up to cosine_sample_size samples for the cross-domain comparison.
+
+    Raises:
+        ValueError: If the fusion head is a cross-attention head, which has no projection.
     """
     text_moments = _Moments()
     projection_moments = _Moments()
@@ -161,13 +165,17 @@ def _diagnose_domain(
     retained_projection: list[npt.NDArray[np.float32]] = []
     retained_count = 0
 
+    fusion = model.fusion
+    if not isinstance(fusion, MultimodalFusion):
+        raise ValueError("Diagnostics measure the linear fusion projection, which a cross-attention head lacks.")
+
     with torch.no_grad():
         for batch in dataloader:
             text_embeddings = batch["text_embeddings"].to(device)
             context = batch["context"].to(device)
             masks = torch.zeros_like(context, dtype=torch.bool)
 
-            projected = model.fusion.projection(text_embeddings)
+            projected = fusion.projection(text_embeddings)
             ts_embeddings = model.adapter.preprocess(context, masks).input_embeddings
 
             text_batch = text_embeddings.cpu().numpy()

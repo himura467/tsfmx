@@ -11,11 +11,16 @@
 #   centered  Fusion head trained on mean-subtracted text: no offset can come from the text.
 #
 # text - constant is what the content adds; centered checks whether that survives without an offset.
+# Two further conditions are run only when named in CONDITIONS, as they need caches with token embeddings:
+#
+#   cross_attention           Each context patch attends to its own report's tokens.
+#   cross_attention_forecast  Each forecast position attends to the tokens of the report in force at the
+#                             forecast origin, which describes the horizon rather than the context.
 # Sweeps run one after another because each mode's trials share outputs/sweeps/<mode>/checkpoints.
 #
 # Usage: ./scripts/run_germany_wind_text_controls.sh [COUNT]
 #   COUNT          Trials per sweep (default 30).
-#   CONDITIONS     Subset to run, e.g. "constant centered" (default: all four).
+#   CONDITIONS     Subset to run, e.g. "constant centered" (default: all four, without the cross_attention ones).
 #   SEED           Seed shared by every sweep (default 42).
 #   FUSION_SWEEP   Fusion search space (default fusion_1layer.yml; centering is exact only for one layer).
 #   AUGMENT_TRAIN  1 trains on the augmented cache, patch_len times the plain one; 0 on the plain one (default 1).
@@ -27,6 +32,8 @@ SEED="${SEED:-42}"
 FUSION_SWEEP="${FUSION_SWEEP:-examples/time_mmd/configs/sweeps/fusion_1layer.yml}"
 AUGMENT_TRAIN="${AUGMENT_TRAIN:-1}"
 ADAPTER_SWEEP="examples/time_mmd/configs/sweeps/adapter.yml"
+CROSS_ATTENTION_SWEEP="examples/time_mmd/configs/sweeps/fusion_cross_attention.yml"
+CROSS_ATTENTION_FORECAST_SWEEP="examples/time_mmd/configs/sweeps/fusion_cross_attention_forecast.yml"
 MODEL_CONFIG="examples/time_mmd/configs/models/chronos.yml"
 DATASET_CONFIG="examples/fidel_ts/configs/datasets/germany_renewable_energy_grid.yml"
 ENTITIES=(wind_50Hertz wind_Amprion wind_TenneT wind_TransnetBW)
@@ -45,13 +52,20 @@ if [[ "$AUGMENT_TRAIN" == 1 ]]; then
     augments+=("--augment")
     augment_args+=(train)
 fi
+text_tokens=("")
+if [[ " $CONDITIONS " == *" cross_attention"* ]]; then
+    text_tokens+=("--text-tokens")
+fi
 for augment in "${augments[@]}"; do
-    uv run python scripts/cache_fidel_ts_datasets.py \
-        --model-config "$MODEL_CONFIG" \
-        --dataset-config "$DATASET_CONFIG" \
-        --text-encoder-type english \
-        --entities "${ENTITIES[@]}" \
-        ${augment:+"$augment"}
+    for tokens in "${text_tokens[@]}"; do
+        uv run python scripts/cache_fidel_ts_datasets.py \
+            --model-config "$MODEL_CONFIG" \
+            --dataset-config "$DATASET_CONFIG" \
+            --text-encoder-type english \
+            --entities "${ENTITIES[@]}" \
+            ${augment:+"$augment"} \
+            ${tokens:+"$tokens"}
+    done
 done
 
 for condition in $CONDITIONS; do
@@ -83,6 +97,13 @@ for condition in $CONDITIONS; do
             uv run python scripts/tune_time_mmd_fusion_sweep.py --sweep-config "$FUSION_SWEEP" "${common_args[@]}" \
                 --center-text
             ;;
+        cross_attention)
+            uv run python scripts/tune_time_mmd_fusion_sweep.py --sweep-config "$CROSS_ATTENTION_SWEEP" "${common_args[@]}"
+            ;;
+        cross_attention_forecast)
+            uv run python scripts/tune_time_mmd_fusion_sweep.py --sweep-config "$CROSS_ATTENTION_FORECAST_SWEEP" \
+                "${common_args[@]}"
+            ;;
         *)
             echo "Unknown condition: $condition" >&2
             exit 1
@@ -99,14 +120,20 @@ for condition in $CONDITIONS; do
 
     # Only heads that see sample-specific text have ablations worth reading: under centering
     # `mean` collapses onto `drop`, which leaves `shuffle` as the test of reading.
-    if [[ "$condition" == "text" || "$condition" == "centered" ]]; then
+    # Cross-attention reads tokens, which `mean` does not perturb, so it gets the other three.
+    ablations=()
+    case "$condition" in
+        text | centered) ablations=(none drop mean shuffle cross_domain) ;;
+        cross_attention | cross_attention_forecast) ablations=(none drop shuffle cross_domain) ;;
+    esac
+    if (( ${#ablations[@]} )); then
         echo "=== Text ablations: $condition ==="
         uv run python scripts/eval_time_mmd_text_ablation.py \
             --model-config "$MODEL_CONFIG" \
             --checkpoint-path "$checkpoint_dir/best_val_loss.pt" \
             --dataset fidel_ts \
             --domains "${ENTITIES[@]}" \
-            --ablations none drop mean shuffle cross_domain \
+            --ablations "${ablations[@]}" \
             --output "$checkpoint_dir/text_ablation.json"
     fi
 done
@@ -119,7 +146,7 @@ from pathlib import Path
 
 out_dir = Path(sys.argv[1])
 entities = sys.argv[2:]
-conditions = ["adapter", "text", "constant", "centered"]
+conditions = ["adapter", "text", "constant", "centered", "cross_attention", "cross_attention_forecast"]
 metrics = {}
 for condition in conditions:
     path = out_dir / condition / "test_metrics.json"
@@ -134,7 +161,7 @@ def mse(condition, row):
     return per_entity[row]["mse"]
 
 present = [c for c in conditions if c in metrics]
-print(f"{'series':<18}" + "".join(f"{c:>20}" for c in present))
+print(f"{'series':<18}" + "".join(f"{c:>26}" for c in present))
 for row in rows:
     cells = []
     for condition in present:
@@ -144,5 +171,5 @@ for row in rows:
             cells.append(f"{value:.4f} ({(value - base) / base * 100:+.1f}%)")
         else:
             cells.append(f"{value:.4f}")
-    print(f"{row:<18}" + "".join(f"{cell:>20}" for cell in cells))
+    print(f"{row:<18}" + "".join(f"{cell:>26}" for cell in cells))
 EOF

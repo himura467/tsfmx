@@ -4,6 +4,8 @@ import pickle
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
+import numpy.typing as npt
 import torch
 
 from tsfmx.data.dataset import MultimodalDatasetBase
@@ -33,11 +35,14 @@ class PreprocessPipeline:
         context_len: int,
         horizon_len: int,
         augment: bool,
+        text_tokens: bool,
     ) -> list[str]:
         """Build the filename components that follow the entity segment."""
         parts = [text_encoder_type, f"p{patch_len}", f"c{context_len}", f"h{horizon_len}"]
         if augment:
             parts.append("aug")
+        if text_tokens:
+            parts.append("tok")
         return parts
 
     def get_path(
@@ -49,6 +54,7 @@ class PreprocessPipeline:
         context_len: int,
         horizon_len: int,
         augment: bool = False,
+        text_tokens: bool = False,
     ) -> Path:
         """Generate a unique file path for the given configuration.
 
@@ -60,6 +66,7 @@ class PreprocessPipeline:
             context_len: Context length.
             horizon_len: Horizon length.
             augment: Whether patch-boundary shift augmentation was applied.
+            text_tokens: Whether the cache also holds per-token text embeddings.
 
         Returns:
             Path to the cache file.
@@ -67,7 +74,7 @@ class PreprocessPipeline:
         parts = [
             *self._head_parts(dataset_name),
             entity,
-            *self._tail_parts(text_encoder_type, patch_len, context_len, horizon_len, augment),
+            *self._tail_parts(text_encoder_type, patch_len, context_len, horizon_len, augment, text_tokens),
         ]
         return self.cache_dir / ("_".join(parts) + ".pkl")
 
@@ -79,6 +86,7 @@ class PreprocessPipeline:
         context_len: int,
         horizon_len: int,
         augment: bool = False,
+        text_tokens: bool = False,
     ) -> set[str]:
         """Discover entity names that have a cached file matching the given configuration.
 
@@ -89,12 +97,15 @@ class PreprocessPipeline:
             context_len: Context length.
             horizon_len: Horizon length.
             augment: Whether patch-boundary shift augmentation was applied.
+            text_tokens: Whether the cache also holds per-token text embeddings.
 
         Returns:
             Set of entity strings found in the cache directory.
         """
         prefix = "_".join(self._head_parts(dataset_name)) + "_"
-        suffix = "_" + "_".join(self._tail_parts(text_encoder_type, patch_len, context_len, horizon_len, augment))
+        suffix = "_" + "_".join(
+            self._tail_parts(text_encoder_type, patch_len, context_len, horizon_len, augment, text_tokens)
+        )
         entities: set[str] = set()
         for path in self.cache_dir.glob(f"{prefix}*{suffix}.pkl"):
             entity = path.stem.removeprefix(prefix).removesuffix(suffix)
@@ -115,11 +126,44 @@ class PreprocessPipeline:
         size_mb = path.stat().st_size / (1024 * 1024)
         _logger.info("Saved %.2f MB", size_mb)
 
+    @staticmethod
+    def _encode_tokens(
+        dataset: MultimodalDatasetBase, text_encoder: TextEncoderBase, batch_size: int = 256
+    ) -> dict[str, npt.NDArray[np.float16]]:
+        """Encode each distinct patch text of the dataset into token embeddings once.
+
+        Overlapping windows, and augmentation above all, repeat every report many times over.
+        Samples share the returned arrays, which pickle then stores once, so the cache grows with
+        the number of reports rather than of samples. Half precision halves it again.
+
+        Args:
+            dataset: Raw dataset whose patch texts to encode.
+            text_encoder: Encoder producing the token embeddings.
+            batch_size: Number of texts encoded per call.
+
+        Returns:
+            Token embeddings of shape (num_tokens, text_dims) keyed by patch text. The empty text
+            maps to zero tokens, so that fusion sees an empty patch as one without text.
+        """
+        distinct = list(
+            dict.fromkeys(
+                " ".join(patch) for i in range(len(dataset)) for patch in dataset[i]["patched_texts"] if patch
+            )
+        )
+        _logger.info("Encoding tokens of %d distinct patch texts", len(distinct))
+        tokens_by_text = {"": np.zeros((0, text_encoder.embedding_dim), dtype=np.float16)}
+        for start in range(0, len(distinct), batch_size):
+            texts = distinct[start : start + batch_size]
+            for text, tokens in zip(texts, text_encoder.encode_tokens(texts)):
+                tokens_by_text[text] = tokens.cpu().numpy().astype(np.float16)
+        return tokens_by_text
+
     def _preprocess(
         self,
         dataset: MultimodalDatasetBase,
         text_encoder: TextEncoderBase | None,
         device: torch.device | None,
+        text_tokens: bool,
     ) -> list[PreprocessedSample]:
         _logger.info(
             "Preprocessing %s samples (%s)",
@@ -130,6 +174,9 @@ class PreprocessPipeline:
             if device is None:
                 raise ValueError("device must be provided when text_encoder is specified")
             text_encoder.eval()
+        tokens_by_text = (
+            self._encode_tokens(dataset, text_encoder) if text_tokens and text_encoder is not None else None
+        )
         result: list[PreprocessedSample] = []
         with torch.no_grad():
             for i in range(len(dataset)):
@@ -143,6 +190,8 @@ class PreprocessPipeline:
                     texts = [" ".join(patch) if patch else "" for patch in sample["patched_texts"]]
                     embeddings = text_encoder(texts)
                     entry["text_embeddings"] = embeddings.cpu().numpy()
+                    if tokens_by_text is not None:
+                        entry["text_tokens"] = [tokens_by_text[text] for text in texts]
                 result.append(entry)
                 if (i + 1) % 100 == 0:
                     _logger.info("Preprocessed %s/%s samples", i + 1, len(dataset))
@@ -156,6 +205,7 @@ class PreprocessPipeline:
         text_encoder: TextEncoderBase | None = None,
         device: torch.device | None = None,
         force_rebuild: bool = False,
+        text_tokens: bool = False,
     ) -> list[PreprocessedSample]:
         """Load preprocessed data from disk, or create and save it if absent.
 
@@ -165,6 +215,7 @@ class PreprocessPipeline:
             text_encoder: Text encoder for fusion/finetune modes. None for adapter mode.
             device: Required when text_encoder is provided.
             force_rebuild: Rebuild even if file exists.
+            text_tokens: Also store per-token text embeddings, which cross-attention fusion reads.
 
         Returns:
             List of preprocessed samples.
@@ -173,6 +224,6 @@ class PreprocessPipeline:
             return self.load(path)
 
         dataset = dataset_factory()
-        data = self._preprocess(dataset, text_encoder, device)
+        data = self._preprocess(dataset, text_encoder, device, text_tokens)
         self._save(path, data)
         return data

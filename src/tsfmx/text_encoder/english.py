@@ -46,6 +46,18 @@ class EnglishTextEncoder(TextEncoderBase):
         return self.sentence_transformer.encode(texts, convert_to_tensor=True)
 
     @override
+    def encode_tokens(self, texts: list[str]) -> list[torch.Tensor]:
+        """Encode texts into per-token embeddings, before any pooling.
+
+        Args:
+            texts: Input texts to encode.
+
+        Returns:
+            One tensor of shape (num_tokens, embedding_dim) per text, without padding.
+        """
+        return list(self.sentence_transformer.encode(texts, output_value="token_embeddings"))
+
+    @override
     def freeze_parameters(self) -> None:
         for param in self.parameters():
             param.requires_grad = False

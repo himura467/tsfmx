@@ -5,7 +5,7 @@ from typing import Literal
 import torch
 
 from examples.time_mmd.configs.model import ModelConfig
-from tsfmx.decoder import MultimodalDecoder, MultimodalDecoderConfig
+from tsfmx.decoder import FusionPosition, FusionType, MultimodalDecoder, MultimodalDecoderConfig
 from tsfmx.text_encoder.base import TextEncoderBase
 from tsfmx.text_encoder.english import EnglishTextEncoder
 from tsfmx.text_encoder.japanese import JapaneseTextEncoder
@@ -82,6 +82,9 @@ def build_decoder(
     device: torch.device,
     num_fusion_layers: int | None = None,
     fusion_hidden_dims: list[int] | None = None,
+    fusion_type: FusionType = "linear",
+    num_attention_heads: int = MultimodalDecoderConfig.num_attention_heads,
+    fusion_position: FusionPosition = "context",
 ) -> MultimodalDecoder:
     """Build a MultimodalDecoder with a pretrained adapter and an initialized fusion head.
 
@@ -90,6 +93,9 @@ def build_decoder(
         device: Device to load the model onto.
         num_fusion_layers: Overrides the config value when given, as sweep trials do.
         fusion_hidden_dims: Overrides the config value when given, as sweep trials do.
+        fusion_type: Fusion head to build, 'linear' or 'cross_attention'.
+        num_attention_heads: Attention heads of a 'cross_attention' head.
+        fusion_position: Where a 'cross_attention' head places its queries, 'context' or 'forecast'.
 
     Returns:
         MultimodalDecoder on device.
@@ -100,7 +106,9 @@ def build_decoder(
     )
 
     _logger.info(
-        "Creating MultimodalDecoder: num_fusion_layers=%d, fusion_hidden_dims=%s",
+        "Creating MultimodalDecoder: fusion_type=%s, fusion_position=%s, num_fusion_layers=%d, fusion_hidden_dims=%s",
+        fusion_type,
+        fusion_position,
         resolved_layers,
         resolved_hidden_dims,
     )
@@ -109,5 +117,8 @@ def build_decoder(
         num_fusion_layers=resolved_layers,
         fusion_hidden_dims=resolved_hidden_dims,
         fusion_normalize=model_config.fusion.fusion_normalize,
+        fusion_type=fusion_type,
+        num_attention_heads=num_attention_heads,
+        fusion_position=fusion_position,
     )
     return MultimodalDecoder(build_adapter(model_config, device), config).to(device)
