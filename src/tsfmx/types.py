@@ -27,6 +27,9 @@ class PreprocessedSample(TypedDict):
     context: npt.NDArray[np.float32]
     horizon: npt.NDArray[np.float32]
     text_embeddings: NotRequired[npt.NDArray[np.float32]]
+    # One (num_tokens, text_dims) array per patch, shared between samples whose patches carry the
+    # same text; an empty patch has zero tokens.
+    text_tokens: NotRequired[list[npt.NDArray[np.float16]]]
     metadata: dict[str, Any]
 
 
@@ -36,6 +39,7 @@ class Batch(TypedDict):
     context: torch.Tensor
     horizon: torch.Tensor
     text_embeddings: NotRequired[torch.Tensor]
+    text_tokens: NotRequired[torch.Tensor]
     metadata: list[dict[str, Any]]
 
 

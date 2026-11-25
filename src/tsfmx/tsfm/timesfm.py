@@ -90,12 +90,19 @@ class TimesFM2p5Adapter(TsfmAdapter):
         self,
         input_embeddings: torch.Tensor,
         masks: torch.Tensor,
+        forecast_embeddings: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Run transformer layers.
 
         Returns:
             Output embeddings (batch_size, num_patches, model_dims).
+
+        Raises:
+            ValueError: If forecast_embeddings is given, since TimesFM forecasts from its last
+                context position and has no forecast positions to receive them.
         """
+        if forecast_embeddings is not None:
+            raise ValueError("TimesFM has no forecast positions; forecast_embeddings must be None")
         output_embeddings = input_embeddings
         for layer in self._model.stacked_xf:
             output_embeddings, _ = layer(output_embeddings, masks[..., -1], None)

@@ -53,6 +53,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--train-ratio", type=float, default=0.7)
     parser.add_argument("--val-ratio", type=float, default=0.1)
     parser.add_argument("--augment", action="store_true", help="Apply patch-boundary shift augmentation.")
+    parser.add_argument(
+        "--text-tokens",
+        action="store_true",
+        help="Also store per-token text embeddings, which cross-attention fusion reads.",
+    )
     parser.add_argument("--cache-dir", type=str, default="data/cache", help="Directory to write cached datasets.")
     parser.add_argument("--force-rebuild", action="store_true", help="Overwrite existing cache files.")
     parser.add_argument("--seed", type=int, help="Random seed for reproducibility.")
@@ -106,6 +111,7 @@ def main() -> int:
                 context_len=forecast_config.context_len,
                 horizon_len=forecast_config.horizon_len,
                 augment=args.augment,
+                text_tokens=args.text_tokens,
             )
 
             def _dataset_factory(entity: str = entity, split: Split = split) -> FidelTsDataset:
@@ -133,6 +139,7 @@ def main() -> int:
                 text_encoder=text_encoder,
                 device=device,
                 force_rebuild=args.force_rebuild,
+                text_tokens=args.text_tokens,
             )
 
     _logger.info("Caching complete")

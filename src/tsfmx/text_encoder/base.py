@@ -29,6 +29,18 @@ class TextEncoderBase(nn.Module, ABC):
     def forward(self, texts: str | list[str] | np.ndarray) -> torch.Tensor: ...
 
     @abstractmethod
+    def encode_tokens(self, texts: list[str]) -> list[torch.Tensor]:
+        """Encode texts into per-token embeddings, before any pooling.
+
+        Args:
+            texts: Input texts to encode.
+
+        Returns:
+            One tensor of shape (num_tokens, embedding_dim) per text, without padding.
+        """
+        ...
+
+    @abstractmethod
     def freeze_parameters(self) -> None: ...
 
     @abstractmethod

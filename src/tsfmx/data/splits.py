@@ -33,6 +33,7 @@ def load_split_dataset(
     horizon_len: int,
     cache_dir: Path,
     mode: TrainingMode,
+    text_tokens: bool = False,
 ) -> ConcatDataset[PreprocessedSample]:
     """Load one split's cached datasets and concatenate them across domains.
 
@@ -45,6 +46,7 @@ def load_split_dataset(
         horizon_len: Length of horizon.
         cache_dir: Directory containing pre-computed cached datasets.
         mode: Training mode passed to PreprocessedDataset.
+        text_tokens: Load the caches that also hold per-token text embeddings.
 
     Returns:
         Concatenated dataset over the given domains.
@@ -60,6 +62,7 @@ def load_split_dataset(
             context_len=context_len,
             horizon_len=horizon_len,
             augment=spec.augment,
+            text_tokens=text_tokens,
         )
         data = cache.load(cache_path)
         datasets.append(PreprocessedDataset(data, mode=mode))
@@ -77,6 +80,7 @@ def load_fold_datasets(
     horizon_len: int,
     cache_dir: Path,
     mode: TrainingMode,
+    text_tokens: bool = False,
 ) -> tuple[ConcatDataset[PreprocessedSample], ConcatDataset[PreprocessedSample], ConcatDataset[PreprocessedSample]]:
     """Load cached datasets for a single fold from pre-computed cache.
 
@@ -91,18 +95,43 @@ def load_fold_datasets(
         horizon_len: Length of horizon.
         cache_dir: Directory containing pre-computed cached datasets.
         mode: Training mode passed to PreprocessedDataset.
+        text_tokens: Load the caches that also hold per-token text embeddings.
 
     Returns:
         Tuple of (train_dataset, val_dataset, test_dataset).
     """
     return (
         load_split_dataset(
-            dataset_name, train_domain_specs, text_encoder_type, patch_len, context_len, horizon_len, cache_dir, mode
+            dataset_name,
+            train_domain_specs,
+            text_encoder_type,
+            patch_len,
+            context_len,
+            horizon_len,
+            cache_dir,
+            mode,
+            text_tokens,
         ),
         load_split_dataset(
-            dataset_name, val_domain_specs, text_encoder_type, patch_len, context_len, horizon_len, cache_dir, mode
+            dataset_name,
+            val_domain_specs,
+            text_encoder_type,
+            patch_len,
+            context_len,
+            horizon_len,
+            cache_dir,
+            mode,
+            text_tokens,
         ),
         load_split_dataset(
-            dataset_name, test_domain_specs, text_encoder_type, patch_len, context_len, horizon_len, cache_dir, mode
+            dataset_name,
+            test_domain_specs,
+            text_encoder_type,
+            patch_len,
+            context_len,
+            horizon_len,
+            cache_dir,
+            mode,
+            text_tokens,
         ),
     )

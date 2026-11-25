@@ -66,18 +66,11 @@ class Chronos2Adapter(TsfmAdapter):
         )
 
     @override
-    def forward(
-        self,
-        input_embeddings: torch.Tensor,
-        masks: torch.Tensor,
-    ) -> torch.Tensor:
-        """Run the Chronos-2 encoder.
-
-        Appends the [REG] token (if enabled) and zero future-patch embeddings,
-        runs all encoder blocks, and returns only the forecast-position hidden states.
+    def forecast_embeddings(self, input_embeddings: torch.Tensor) -> torch.Tensor:
+        """Embed the future patches, which carry their time encoding and no covariates.
 
         Returns:
-            Output embeddings (batch_size, max_output_patches, model_dims).
+            Future-patch embeddings (batch_size, max_output_patches, model_dims).
         """
         batch_size = input_embeddings.shape[0]
         dtype = input_embeddings.dtype
@@ -104,6 +97,36 @@ class Chronos2Adapter(TsfmAdapter):
 
         future_embeds: torch.Tensor = self._model.input_patch_embedding(
             torch.cat([future_time_enc, patched_future_covariates, patched_future_covariates_mask], dim=-1)
+        )
+        return future_embeds
+
+    @override
+    def forward(
+        self,
+        input_embeddings: torch.Tensor,
+        masks: torch.Tensor,
+        forecast_embeddings: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Run the Chronos-2 encoder.
+
+        Appends the [REG] token (if enabled) and the future-patch embeddings, runs all encoder
+        blocks, and returns only the forecast-position hidden states.
+
+        Args:
+            input_embeddings: Context embeddings (batch_size, num_patches, model_dims).
+            masks: Boolean masks (batch_size, num_patches). True = padded, False = valid.
+            forecast_embeddings: Future-patch embeddings as fusion returns them. Defaults to the
+                unfused ones of `forecast_embeddings()`.
+
+        Returns:
+            Output embeddings (batch_size, max_output_patches, model_dims).
+        """
+        batch_size = input_embeddings.shape[0]
+        dtype = input_embeddings.dtype
+        device = input_embeddings.device
+        num_output_patches = self._model.chronos_config.max_output_patches
+        future_embeds = (
+            forecast_embeddings if forecast_embeddings is not None else self.forecast_embeddings(input_embeddings)
         )
 
         # Flip to Chronos-2 convention: 1.0 = valid, 0.0 = padded.
